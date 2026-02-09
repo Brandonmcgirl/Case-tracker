@@ -1,0 +1,31 @@
+name: Update Log
+
+on:
+  workflow_dispatch: # allows manual/API trigger
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Read existing log
+        id: readlog
+        run: |
+          if [ ! -f log.json ]; then echo "[]" > log.json; fi
+          echo "::set-output name=data::$(cat log.json | jq -c .)"
+
+      - name: Update log
+        run: |
+          NEW_ENTRY='${{ github.event.inputs.new_entry }}'
+          RESET='${{ github.event.inputs.reset }}'
+          if [ "$RESET" == "true" ]; then
+            echo "[]" > log.json
+          else
+            echo '${{ steps.readlog.outputs.data }}' | jq ". + [ $NEW_ENTRY ]" > log.json
+          fi
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add log.json
+          git commit -m "Update log"
+          git push
