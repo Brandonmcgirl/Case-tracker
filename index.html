@@ -44,7 +44,6 @@ button.reset {
 small { color: #94a3b8; }
 </style>
 </head>
-
 <body>
 
 <h1>Hourly Case Tracker</h1>
@@ -77,17 +76,18 @@ let material = "";
 let date = "";
 let lastCount = null;
 
-const GITHUB_REPO = "Brandonmcgirl/Case-tracker";
-const WORKFLOW_FILE = "update-log.yml";
+// Your phone's server IP
+const SERVER_URL = "http://192.0.0.2:5000";
 
-// Load existing log
+// Load log from server
 async function loadLog() {
   try {
-    const res = await fetch("log.json?" + new Date().getTime());
+    const res = await fetch(`${SERVER_URL}/log.json?` + new Date().getTime());
     const data = await res.json();
     displayLog(data);
   } catch (err) {
     console.error(err);
+    document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
   }
 }
 
@@ -113,27 +113,28 @@ function displayLog(entries) {
   }
 }
 
-// Helper: send an entry to the workflow
-async function sendToWorkflow(entryObj, reset=false) {
+// Send entry to your local server
+async function sendToServer(entryObj, reset=false) {
   const password = prompt("Enter password:");
   if (password !== "tyvek") {
     alert("Wrong password! Entry not logged.");
     return;
   }
 
-  await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`, {
-    method: "POST",
-    headers: { "Accept": "application/vnd.github.v3+json" },
-    body: JSON.stringify({
-      ref: "main",
-      inputs: { new_entry: JSON.stringify(entryObj), reset: reset.toString(), password }
-    })
-  });
-
-  loadLog();
+  try {
+    await fetch(`${SERVER_URL}/add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entry: entryObj, reset, password })
+    });
+    loadLog();
+  } catch(err) {
+    console.error(err);
+    alert("Failed to send to server.");
+  }
 }
 
-// Set the day and log the starting count
+// Set the day and log starting count
 function setDaily() {
   date = document.getElementById("date").value || new Date().toDateString();
   material = document.getElementById("material").value;
@@ -149,10 +150,10 @@ function setDaily() {
   document.getElementById("log").innerHTML = "";
 
   const entryObj = { date, time: "Start", material, count: lastCount, diff: 0 };
-  sendToWorkflow(entryObj, false);
+  sendToServer(entryObj, false);
 }
 
-// Add an hourly entry
+// Add hourly entry
 async function addEntry() {
   if (lastCount === null) {
     alert("Set the day first");
@@ -167,13 +168,13 @@ async function addEntry() {
   lastCount = count;
   const entryObj = { date, time, material, count, diff };
 
-  await sendToWorkflow(entryObj, false);
+  await sendToServer(entryObj, false);
 
   document.getElementById("time").value = "";
   document.getElementById("count").value = "";
 }
 
-// Reset the day
+// Reset day
 async function resetDay() {
   if (!confirm("Reset for new day?")) return;
 
@@ -187,7 +188,7 @@ async function resetDay() {
   document.getElementById("material").value = "";
   document.getElementById("startCount").value = "";
 
-  await sendToWorkflow({}, true);
+  await sendToServer({}, true);
 }
 
 // Auto-refresh every 20 seconds
