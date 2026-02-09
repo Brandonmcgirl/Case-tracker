@@ -54,14 +54,15 @@ small { color: #94a3b8; }
 <button class="reset" onclick="resetDay()">Reset Day</button>
 
 <script>
-let lines = [];         // list of line names
-let currentLine = "";   // selected line
+let lines = [];         
+let currentLine = "";   
 let lastCount = null;
 let date = "";
 let material = "";
 
 const SERVER_URL = "https://contacting-objective-done-karma.trycloudflare.com"; // update if needed
 
+// Load log and update UI
 async function loadLog() {
   try {
     const res = await fetch(`${SERVER_URL}/log.json?` + new Date().getTime());
@@ -74,6 +75,7 @@ async function loadLog() {
   }
 }
 
+// Populate line dropdown
 function populateLines(data) {
   const uniqueLines = Array.from(new Set(data.map(e => e.line))).filter(l => l);
   lines = uniqueLines;
@@ -95,6 +97,7 @@ function populateLines(data) {
   }
 }
 
+// When line selection changes
 function lineChanged() {
   const select = document.getElementById("lineSelect");
   currentLine = select.value;
@@ -103,6 +106,7 @@ function lineChanged() {
   displayLog();
 }
 
+// Add a new line and persist
 function addLine() {
   const lineName = document.getElementById("newLine").value.trim();
   if (!lineName) return alert("Enter a line name");
@@ -117,8 +121,13 @@ function addLine() {
   document.getElementById("newLine").value = "";
   lastCount = null;
   document.getElementById("summary").innerHTML = "<small>Waiting for setup...</small>";
+
+  // Persist initial empty entry
+  const initEntry = { date: new Date().toDateString(), time: "Init", material: "-", count: 0, diff: 0, line: currentLine };
+  sendToServer(initEntry);
 }
 
+// Delete a line
 function deleteLine() {
   if (!currentLine) return alert("Select a line to delete");
   if (!confirm(`Delete line "${currentLine}"? This cannot be undone`)) return;
@@ -130,6 +139,7 @@ function deleteLine() {
   document.getElementById("log").innerHTML = "";
 }
 
+// Display log entries for current line
 function displayLog(data=[]) {
   const logDiv = document.getElementById("log");
   logDiv.innerHTML = "";
@@ -154,6 +164,7 @@ function displayLog(data=[]) {
   }
 }
 
+// Send data to server
 async function sendToServer(entryObj, reset=false, line="", action="add") {
   const password = prompt("Enter password:");
   if (password !== "tyvek") return alert("Wrong password!");
@@ -162,7 +173,7 @@ async function sendToServer(entryObj, reset=false, line="", action="add") {
     const res = await fetch(`${SERVER_URL}/add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entry: entryObj, reset, line, action, password })
+      body: JSON.stringify({ entry: entryObj, reset, line: line || currentLine, action, password })
     });
     const result = await res.json();
     console.log("Server response:", result);
@@ -173,6 +184,7 @@ async function sendToServer(entryObj, reset=false, line="", action="add") {
   }
 }
 
+// Set daily starting entry
 function setDaily() {
   if (!currentLine) return alert("Select or create a line first");
 
@@ -188,6 +200,7 @@ function setDaily() {
   sendToServer(entryObj);
 }
 
+// Add an hourly entry
 async function addEntry() {
   if (!currentLine) return alert("Select or create a line first");
   if (lastCount === null) return alert("Set the day first");
@@ -206,6 +219,7 @@ async function addEntry() {
   document.getElementById("count").value = "";
 }
 
+// Reset current line
 async function resetDay() {
   if (!currentLine) return alert("Select a line first");
   if (!confirm("Reset this line for new day?")) return;
@@ -223,7 +237,7 @@ async function resetDay() {
   await sendToServer({}, true, currentLine);
 }
 
-// Auto-refresh every 10s
+// Auto-refresh
 setInterval(loadLog, 10000);
 loadLog();
 </script>
