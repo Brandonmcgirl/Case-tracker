@@ -6,10 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-/* ✅ FIX: Prevent input overflow on mobile */
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   font-family: Arial, sans-serif;
@@ -18,9 +15,7 @@ body {
   padding: 20px;
 }
 
-h1 {
-  margin-bottom: 10px;
-}
+h1 { margin-bottom: 10px; }
 
 input, button, select {
   width: 100%;
@@ -36,9 +31,7 @@ button {
   border-radius: 6px;
 }
 
-button.reset {
-  background: #dc2626;
-}
+button.reset { background: #dc2626; }
 
 .card {
   background: #020617;
@@ -53,13 +46,9 @@ button.reset {
   padding-top: 10px;
 }
 
-.log-entry {
-  margin-bottom: 6px;
-}
+.log-entry { margin-bottom: 6px; }
 
-small {
-  color: #94a3b8;
-}
+small { color: #94a3b8; }
 </style>
 </head>
 
@@ -78,11 +67,10 @@ small {
 </div>
 
 <div class="card">
-  <h3>Daily Setup</h3>
-  <input id="date" placeholder="Date (e.g. Mon Feb 9 2026)(7am)">
+  <h3>Run Setup</h3>
   <input id="material" placeholder="Material Code (56731)">
   <input id="startCount" type="number" placeholder="Starting Case Count">
-  <button onclick="setDaily()">Set Day</button>
+  <button onclick="startRun()">Start Run</button>
 </div>
 
 <div class="card">
@@ -94,223 +82,162 @@ small {
 
 <div class="card">
   <h3>Log</h3>
-  <div id="summary"><small>Waiting for setup...</small></div>
+  <div id="liveTime"><small></small></div>
+  <div id="summary"><small>Waiting for run...</small></div>
   <div id="log" class="log"></div>
 </div>
 
-<button class="reset" onclick="resetDay()">Reset Day</button>
+<div class="card">
+  <h3>Last Run Info</h3>
+  <div id="lastRun"><small>No previous run</small></div>
+</div>
+
+<button class="reset" onclick="endRun()">End Of Run</button>
 
 <script>
 let lines = [];
 let currentLine = "";
 let lastCount = null;
-let date = "";
 let material = "";
+let runStartTime = null;
+let lastRun = null;
 
 const SERVER_URL = "https://cases.hytalesanarchy.com";
 
-// Load log and update UI
+/* ===== Live Clock ===== */
+function updateClock() {
+  const now = new Date();
+  const formatted =
+    now.toDateString() +
+    " (" +
+    now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) +
+    ")";
+  document.getElementById("liveTime").innerHTML = `<small>${formatted}</small>`;
+}
+setInterval(updateClock, 60000);
+updateClock();
+
+/* ===== Load Log ===== */
 async function loadLog() {
   try {
-    const res = await fetch(`${SERVER_URL}/log.json?` + new Date().getTime());
+    const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);
     const data = await res.json();
     populateLines(data);
     displayLog(data);
-  } catch (err) {
-    console.error(err);
+  } catch {
     document.getElementById("log").innerHTML =
       "<small>Server not reachable.</small>";
   }
 }
 
-// Populate line dropdown
+/* ===== Lines ===== */
 function populateLines(data) {
-  const uniqueLines = Array.from(new Set(data.map(e => e.line))).filter(Boolean);
-  lines = uniqueLines;
-
+  lines = [...new Set(data.map(e => e.line))].filter(Boolean);
   const select = document.getElementById("lineSelect");
-  const old = select.value;
-
   select.innerHTML = '<option value="">-- Select Line --</option>';
   lines.forEach(l => {
-    const option = document.createElement("option");
-    option.value = l;
-    option.text = l;
-    select.appendChild(option);
+    const o = document.createElement("option");
+    o.value = l;
+    o.text = l;
+    select.appendChild(o);
   });
-
-  if (lines.includes(old)) {
-    select.value = old;
-    currentLine = old;
-  }
 }
 
-// When line selection changes
 function lineChanged() {
-  currentLine = document.getElementById("lineSelect").value;
+  currentLine = lineSelect.value;
   lastCount = null;
+  material = "";
   document.getElementById("summary").innerHTML =
-    "<small>Waiting for setup...</small>";
-  displayLog();
-}
-
-// Add a new line
-function addLine() {
-  const lineName = document.getElementById("newLine").value.trim();
-  if (!lineName) return alert("Enter a line name");
-
-  if (!lines.includes(lineName)) lines.push(lineName);
-  currentLine = lineName;
-
-  const select = document.getElementById("lineSelect");
-  const option = document.createElement("option");
-  option.value = lineName;
-  option.text = lineName;
-  select.appendChild(option);
-  select.value = lineName;
-
-  document.getElementById("newLine").value = "";
-  lastCount = null;
-  document.getElementById("summary").innerHTML =
-    "<small>Waiting for setup...</small>";
-
-  const initEntry = {
-    date: new Date().toDateString(),
-    time: "Init",
-    material: "-",
-    count: 0,
-    diff: 0,
-    line: currentLine
-  };
-
-  sendToServer(initEntry);
-}
-
-// Delete a line
-function deleteLine() {
-  if (!currentLine) return alert("Select a line to delete");
-  if (!confirm(`Delete line "${currentLine}"?`)) return;
-
-  sendToServer({}, true, currentLine, "delete");
-  currentLine = "";
-  lastCount = null;
-
-  document.getElementById("lineSelect").value = "";
-  document.getElementById("summary").innerHTML =
-    "<small>Waiting for setup...</small>";
+    "<small>Waiting for run...</small>";
   document.getElementById("log").innerHTML = "";
 }
 
-// Display log
-function displayLog(data = []) {
-  const logDiv = document.getElementById("log");
-  logDiv.innerHTML = "";
-
-  if (!currentLine) return;
-
-  const lineEntries = data.filter(e => e.line === currentLine);
-
-  lineEntries.forEach(entry => {
-    const div = document.createElement("div");
-    div.className = "log-entry";
-    div.innerHTML = `${entry.time} | ${entry.material} | ${entry.count} <b>(+${entry.diff || 0})</b>`;
-    logDiv.appendChild(div);
-  });
-
-  if (lineEntries.length) {
-    const last = lineEntries.at(-1);
-    document.getElementById("summary").innerHTML =
-      `<b>${last.date}</b><br>Material: ${last.material}<br>Last Count: ${last.count}`;
-    lastCount = last.count;
-    material = last.material;
-    date = last.date;
-  }
-}
-
-// Send to server
-async function sendToServer(entryObj, reset = false, line = "", action = "add") {
-  const password = prompt("Enter password:");
-  if (password !== "tyvek") return alert("Wrong password!");
-
-  try {
-    await fetch(`${SERVER_URL}/add`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        entry: entryObj,
-        reset,
-        line: line || currentLine,
-        action,
-        password
-      })
-    });
-    loadLog();
-  } catch {
-    alert("Failed to send to server.");
-  }
-}
-
-// Set daily
-function setDaily() {
+/* ===== Run Control ===== */
+function startRun() {
   if (!currentLine) return alert("Select a line first");
 
-  date = document.getElementById("date").value || new Date().toDateString();
-  material = document.getElementById("material").value;
-  lastCount = parseInt(document.getElementById("startCount").value);
-
+  material = materialInput.value;
+  lastCount = parseInt(startCount.value);
   if (!material || isNaN(lastCount))
     return alert("Enter material and starting count");
 
-  const entryObj = {
-    date,
-    time: "Start",
-    material,
-    count: lastCount,
-    diff: 0,
-    line: currentLine
-  };
+  runStartTime = new Date();
 
-  sendToServer(entryObj);
+  document.getElementById("summary").innerHTML =
+    `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
 }
 
-// Add entry
-async function addEntry() {
+function endRun() {
+  if (!runStartTime) return alert("No active run");
+
+  lastRun = {
+    material,
+    count: lastCount,
+    start: runStartTime,
+    end: new Date()
+  };
+
+  document.getElementById("lastRun").innerHTML = `
+    <b>Material:</b> ${lastRun.material}<br>
+    <b>Last Count:</b> ${lastRun.count}<br>
+    <b>Start:</b> ${lastRun.start.toDateString()} (${lastRun.start.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})})<br>
+    <b>End:</b> ${lastRun.end.toDateString()} (${lastRun.end.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})})
+  `;
+
+  material = "";
+  lastCount = null;
+  runStartTime = null;
+
+  document.getElementById("summary").innerHTML =
+    "<small>Waiting for run...</small>";
+  document.getElementById("log").innerHTML = "";
+}
+
+/* ===== Entries ===== */
+function addEntry() {
   if (!currentLine || lastCount === null)
-    return alert("Set the day first");
+    return alert("Start a run first");
 
-  const time = document.getElementById("time").value;
-  const count = parseInt(document.getElementById("count").value);
-
+  const time = timeInput.value;
+  const count = parseInt(countInput.value);
   if (!time || isNaN(count)) return;
 
   const diff = count - lastCount;
   lastCount = count;
 
-  sendToServer({ date, time, material, count, diff, line: currentLine });
+  sendToServer({
+    date: new Date().toDateString(),
+    time,
+    material,
+    count,
+    diff,
+    line: currentLine
+  });
 
-  document.getElementById("time").value = "";
-  document.getElementById("count").value = "";
+  timeInput.value = "";
+  countInput.value = "";
 }
 
-// Reset
-async function resetDay() {
-  if (!currentLine) return alert("Select a line first");
-  if (!confirm("Reset this line?")) return;
+/* ===== Server ===== */
+async function sendToServer(entry) {
+  const password = prompt("Enter password:");
+  if (password !== "tyvek") return;
 
-  lastCount = null;
-  date = "";
-  material = "";
+  await fetch(`${SERVER_URL}/add`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      entry,
+      line: currentLine,
+      password
+    })
+  });
 
-  document.getElementById("summary").innerHTML =
-    "<small>Waiting for setup...</small>";
-  document.getElementById("log").innerHTML = "";
-
-  await sendToServer({}, true, currentLine);
+  loadLog();
 }
 
-// Auto-refresh
-setInterval(loadLog, 10000);
 loadLog();
+setInterval(loadLog, 10000);
 </script>
 
 </body>
