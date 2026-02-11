@@ -146,7 +146,7 @@ function lineChanged() {
   material = "";
   runStartTime = null;
   document.getElementById("summary").innerHTML = "<small>Waiting for run...</small>";
-  document.getElementById("log").innerHTML = "";
+  displayLog([]); 
   updateLastRunInfo();
 }
 
@@ -156,7 +156,8 @@ function addLine() {
   if (!name) return alert("Enter a line name");
   currentLine = name;
   document.getElementById("newLine").value = "";
-  sendToServer({
+
+  promptAndSend({
     date: new Date().toDateString(),
     time: "Init",
     material: "-",
@@ -170,7 +171,8 @@ function addLine() {
 function deleteLine() {
   if (!currentLine) return alert("Select a line first");
   if (!confirm(`Delete line "${currentLine}"?`)) return;
-  sendToServer({}, true, currentLine, "delete");
+
+  promptAndSend({}, true, currentLine, "delete");
   currentLine = "";
   document.getElementById("log").innerHTML = "";
   document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
@@ -186,8 +188,12 @@ function startRun() {
 
   runStartTime = new Date();
 
-  // Log Start entry to server
-  sendToServer({
+  if (!lastRun[currentLine]) lastRun[currentLine] = {};
+  lastRun[currentLine].material = material;
+  lastRun[currentLine].count = lastCount;
+  lastRun[currentLine].start = runStartTime;
+
+  promptAndSend({
     date: new Date().toDateString(),
     time: "Start",
     material,
@@ -204,12 +210,8 @@ function startRun() {
 function endRun() {
   if (!runStartTime) return alert("No active run");
 
-  lastRun[currentLine] = {
-    material,
-    count: lastCount,
-    start: runStartTime,
-    end: new Date()
-  };
+  if (!lastRun[currentLine]) lastRun[currentLine] = {};
+  lastRun[currentLine].end = new Date();
 
   document.getElementById("lastRun").innerHTML = `
     <b>Material:</b> ${lastRun[currentLine].material}<br>
@@ -218,12 +220,10 @@ function endRun() {
     <b>End:</b> ${lastRun[currentLine].end.toLocaleString()}
   `;
 
-  // Do NOT delete the line; just clear local run state
   material = "";
   lastCount = null;
   runStartTime = null;
   document.getElementById("summary").innerHTML = "<small>Waiting for run...</small>";
-  document.getElementById("log").innerHTML = "";
 }
 
 /* ===== ADD ENTRY ===== */
@@ -236,7 +236,10 @@ function addEntry() {
   const diff = count - lastCount;
   lastCount = count;
 
-  sendToServer({
+  if (!lastRun[currentLine]) lastRun[currentLine] = {};
+  lastRun[currentLine].count = lastCount;
+
+  promptAndSend({
     date: new Date().toDateString(),
     time,
     material,
@@ -247,6 +250,9 @@ function addEntry() {
 
   timeInput.value = "";
   countInput.value = "";
+
+  document.getElementById("summary").innerHTML =
+    `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
 }
 
 /* ===== DISPLAY LOG ===== */
@@ -296,8 +302,8 @@ function updateLastRunInfo(data = []) {
   }
 }
 
-/* ===== SERVER ===== */
-async function sendToServer(entry, reset = false, line = "", action = "add") {
+/* ===== SERVER PROMPT & SEND ===== */
+async function promptAndSend(entry, reset = false, line = "", action = "add") {
   const password = prompt("Enter password:");
   if (password !== "tyvek") return alert("Wrong password");
 
