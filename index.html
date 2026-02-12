@@ -261,7 +261,7 @@ async function endRun() {
   logData.push(lastRunObj);
 
   // Send updated log back to server
-  await sendToServer({ logData }, false, currentLine, "overwrite", true); // 
+  await sendToServer({ logData }, false, currentLine, "endrun", true); // 
 
   // Reset frontend state
   lastCount = null;
