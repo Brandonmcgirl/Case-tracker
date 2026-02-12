@@ -34,6 +34,7 @@ small { color: #94a3b8; }
   <h3>Run Setup</h3>
   <input id="material" placeholder="Material Code">
   <input id="startCount" type="number" placeholder="Starting Case Count">
+  <input id="targetCount" type="number" placeholder="Target Case Count (optional)">
   <button onclick="startRun()">Start Run</button>
 </div>
 
@@ -63,6 +64,7 @@ small { color: #94a3b8; }
 let lines = [];
 let currentLine = "";
 let lastCount = null;
+let targetCount = null;
 let material = "";
 let runStartTime = null;
 let lastRun = {}; // per line
@@ -72,6 +74,7 @@ const SERVER_URL = "https://cases.hytalesanarchy.com";
 const lineSelect = document.getElementById("lineSelect");
 const materialInput = document.getElementById("material");
 const startCountInput = document.getElementById("startCount");
+const targetCountInput = document.getElementById("targetCount");
 const timeInput = document.getElementById("time");
 const countInput = document.getElementById("count");
 
@@ -145,8 +148,18 @@ async function loadLog() {
         runStartTime = activeStart.timestamp
             ? new Date(activeStart.timestamp)
             : new Date(); // fallback if missing
-        lastCount = activeStart.count;
         material = activeStart.material;
+        
+        // Find the latest count for this line
+        const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
+        if (lineEntries.length > 0) {
+          const latestEntry = lineEntries[lineEntries.length - 1];
+          lastCount = latestEntry.count;
+        } else {
+          lastCount = activeStart.count;
+        }
+        
+        targetCount = activeStart.targetCount || null;
         updateSummary();
       }
     }
@@ -169,7 +182,7 @@ function populateLines(data) {
 
 function lineChanged() {
   currentLine = lineSelect.value;
-  lastCount = null; material = ""; runStartTime = null;
+  lastCount = null; targetCount = null; material = ""; runStartTime = null;
   updateSummary();
   displayLog([]);
   updateLastRunInfo();
@@ -178,8 +191,12 @@ function lineChanged() {
 /* ===== SUMMARY UPDATE ===== */
 function updateSummary() {
   const summary = document.getElementById("summary");
-  if (currentLine && lastCount !== null) {
-    summary.innerHTML = `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
+  if (currentLine && material) {
+    let summaryHTML = `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount !== null ? lastCount : 'N/A'}`;
+    if (targetCount !== null) {
+      summaryHTML += `<br><b>Target Count:</b> ${targetCount}`;
+    }
+    summary.innerHTML = summaryHTML;
   } else {
     summary.innerHTML = "<small>Waiting for run...</small>";
   }
@@ -211,7 +228,7 @@ async function deleteLine() {
   await sendToServer({}, true, currentLine, "delete", true);
 
   currentLine = "";
-  lastCount = null; material = ""; runStartTime = null;
+  lastCount = null; targetCount = null; material = ""; runStartTime = null;
   updateSummary();
   document.getElementById("log").innerHTML = "";
   document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
@@ -221,8 +238,9 @@ async function deleteLine() {
 async function startRun() {
   if (!currentLine) return alert("Select a line first");
   material = materialInput.value.trim();
-  lastCount = parseInt(startCountInput.value);
-  if (!material || isNaN(lastCount)) return alert("Invalid setup");
+  lastCount = parseInt(startCountInput.value) || 0;
+  targetCount = parseInt(targetCountInput.value) || null;
+  if (!material) return alert("Invalid setup");
   runStartTime = new Date();
 
   const entry = {
@@ -231,7 +249,8 @@ async function startRun() {
     material,
     count: lastCount,
     diff: 0,
-    line: currentLine
+    line: currentLine,
+    targetCount: targetCount
   };
 
   await sendToServer(entry, false, currentLine, "add", true);
@@ -240,12 +259,12 @@ async function startRun() {
 
 /* ===== ADD ENTRY ===== */
 async function addEntry() {
-  if (!currentLine || lastCount === null) return alert("Start a run first");
+  if (!currentLine) return alert("Start a run first");
   const time = timeInput.value.trim();
   const count = parseInt(countInput.value);
   if (!time || isNaN(count)) return alert("Invalid entry");
 
-  const diff = count - lastCount;
+  const diff = count - (lastCount || 0);
   const entry = {
     date: new Date().toDateString(),
     time,
@@ -280,17 +299,20 @@ async function endRun() {
             material: lr.material,
             count: lr.count,
             start: startDate,
-            end: endDate
+            end: endDate,
+            targetCount: lr.targetCount
         };
         const l = lastRun[currentLine];
         document.getElementById("lastRun").innerHTML = `
             <b>Material:</b> ${l.material}<br>
             <b>Last Count:</b> ${l.count}<br>
+            <b>Target Count:</b> ${l.targetCount || 'N/A'}<br>
             <b>Start:</b> ${l.start.toLocaleString()}<br>
             <b>End:</b> ${l.end.toLocaleString()}
         `;
 
         lastCount = l.count; // update lastCount so summary shows correctly until new run
+        targetCount = l.targetCount;
     }
 
     runStartTime = null;
@@ -326,7 +348,8 @@ function updateLastRunInfo(data = []) {
       material: lr.material,
       count: lr.count,
       start: new Date(lr.start),
-      end: new Date(lr.end)
+      end: new Date(lr.end),
+      targetCount: lr.targetCount
     };
   }
 
@@ -335,6 +358,7 @@ function updateLastRunInfo(data = []) {
     document.getElementById("lastRun").innerHTML = `
       <b>Material:</b> ${lr.material}<br>
       <b>Last Count:</b> ${lr.count}<br>
+      <b>Target Count:</b> ${lr.targetCount || 'N/A'}<br>
       <b>Start:</b> ${lr.start.toLocaleString()}<br>
       <b>End:</b> ${lr.end.toLocaleString()}
     `;
