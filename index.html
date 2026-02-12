@@ -295,6 +295,22 @@ function displayLog(data = []) {
     });
 }
 
+/* ===== HELPER ===== */
+function formatLocalTime(isoString) {
+  if (!isoString) return "-";
+  const d = new Date(isoString);
+  // Format as: Feb 12, 10:56 AM (local time, no milliseconds)
+  return d.toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+}
+
 /* ===== LAST RUN ===== */
 function extractLastRun(data) {
   const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
@@ -307,11 +323,23 @@ function extractLastRun(data) {
 
   const lr = lastRunEntry.last_run;
 
+  const startLocal = formatLocalTime(lr.start);
+  const endLocal   = formatLocalTime(lr.end);
+
+  // Optional: calculate run duration
+  const durationMs = new Date(lr.end) - new Date(lr.start);
+  const durationSec = Math.floor(durationMs / 1000);
+  const hours = Math.floor(durationSec / 3600);
+  const minutes = Math.floor((durationSec % 3600) / 60);
+  const seconds = durationSec % 60;
+  const durationStr = `${hours ? hours + 'h ' : ''}${minutes ? minutes + 'm ' : ''}${seconds}s`;
+
   el.innerHTML = `
     <b>Material:</b> ${lr.material}<br>
     <b>Last Count:</b> ${lr.count}<br>
-    <b>Start:</b> ${lr.start}<br>
-    <b>End:</b> ${lr.end}
+    <b>Start:</b> ${startLocal}<br>
+    <b>End:</b> ${endLocal}<br>
+    <b>Duration:</b> ${durationStr}
   `;
 }
 
