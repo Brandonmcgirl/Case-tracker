@@ -77,12 +77,16 @@ const timeInput = document.getElementById("time");
 const countInput = document.getElementById("count");
 
 /* ===== LIVE CLOCK ===== */
+function getNow() {
+  return new Date(); // single source of truth
+}
+
 function updateClock() {
-  const now = new Date();
+  const now = getNow();
   document.getElementById("liveTime").innerHTML =
     `<small>${now.toDateString()} (${now.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})})</small>`;
 }
-setInterval(updateClock, 60000);
+setInterval(updateClock, 1000);
 updateClock();
 
 /* ===== PASSWORD ===== */
@@ -130,29 +134,11 @@ async function loadLog() {
     const data = await res.json();
 
     populateLines(data);
-    detectActiveRun(data);
     displayLog(data);
     updateLastRunInfo(data);
 
   } catch {
     document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
-  }
-}
-
-/* ===== DETECT ACTIVE RUN ===== */
-function detectActiveRun(data) {
-  if (!currentLine) return;
-
-  const starts = data
-    .filter(e => e.line === currentLine && e.time === "Start")
-    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-
-  if (starts.length > 0) {
-    const latest = starts[0];
-    runStartTime = latest.timestamp ? new Date(latest.timestamp) : null;
-    lastCount = latest.count;
-    material = latest.material;
-    updateSummary();
   }
 }
 
@@ -181,8 +167,7 @@ function lineChanged() {
   material = "";
   runStartTime = null;
   updateSummary();
-  displayLog([]);
-  updateLastRunInfo();
+  document.getElementById("log").innerHTML = "";
 }
 
 /* ===== SUMMARY ===== */
@@ -196,42 +181,6 @@ function updateSummary() {
   }
 }
 
-/* ===== ADD LINE ===== */
-async function addLine() {
-  const name = document.getElementById("newLine").value.trim();
-  if (!name) return alert("Enter line name");
-
-  currentLine = name;
-  document.getElementById("newLine").value = "";
-
-  const entry = {
-    timestamp: new Date().toISOString(),
-    time: "Init",
-    material: "-",
-    count: 0,
-    diff: 0,
-    line: currentLine
-  };
-
-  await sendToServer(entry, false, currentLine, "add", true);
-}
-
-/* ===== DELETE LINE ===== */
-async function deleteLine() {
-  if (!currentLine) return alert("Select a line first");
-  if (!confirm(`Delete line "${currentLine}"?`)) return;
-
-  await sendToServer({}, true, currentLine, "delete", true);
-
-  currentLine = "";
-  lastCount = null;
-  material = "";
-  runStartTime = null;
-  updateSummary();
-  document.getElementById("log").innerHTML = "";
-  document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
-}
-
 /* ===== START RUN ===== */
 async function startRun() {
   if (!currentLine) return alert("Select a line first");
@@ -240,7 +189,8 @@ async function startRun() {
   lastCount = parseInt(startCountInput.value);
   if (!material || isNaN(lastCount)) return alert("Invalid setup");
 
-  runStartTime = new Date();
+  // 🔥 EXACT LIVE CLOCK TIME
+  runStartTime = getNow();
 
   const entry = {
     timestamp: runStartTime.toISOString(),
@@ -248,6 +198,7 @@ async function startRun() {
     material,
     count: lastCount,
     diff: 0,
+    start_time: runStartTime.toISOString(),
     line: currentLine
   };
 
@@ -267,7 +218,7 @@ async function addEntry() {
   const diff = count - lastCount;
 
   const entry = {
-    timestamp: new Date().toISOString(),
+    timestamp: getNow().toISOString(),
     time,
     material,
     count,
@@ -288,22 +239,31 @@ async function addEntry() {
 async function endRun() {
   if (!runStartTime) return alert("No active run");
 
-  const data = await sendToServer({}, false, currentLine, "endrun", true);
+  const runEndTime = getNow(); // 🔥 EXACT LIVE CLOCK TIME
 
-  if (!data.error && data.last_run) {
-    const lr = data.last_run;
+  const entry = {
+    timestamp: runEndTime.toISOString(),
+    time: "End",
+    material,
+    count: lastCount,
+    diff: 0,
+    end_time: runEndTime.toISOString(),
+    line: currentLine
+  };
 
-    lastRun[currentLine] = {
-      material: lr.material,
-      count: lr.count,
-      start: lr.start ? new Date(lr.start) : null,
-      end: lr.end ? new Date(lr.end) : null
-    };
-  }
+  await sendToServer(entry, false, currentLine, "add", true);
+
+  lastRun[currentLine] = {
+    material,
+    count: lastCount,
+    start: runStartTime,
+    end: runEndTime
+  };
 
   lastCount = null;
   material = "";
   runStartTime = null;
+
   updateSummary();
   updateLastRunInfo();
 }
@@ -315,7 +275,7 @@ function displayLog(data = []) {
   if (!currentLine) return;
 
   data
-    .filter(e => e.line === currentLine && !e.last_run)
+    .filter(e => e.line === currentLine)
     .sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
     .forEach(e => {
       const d = document.createElement("div");
@@ -327,37 +287,20 @@ function displayLog(data = []) {
 }
 
 /* ===== LAST RUN INFO ===== */
-function updateLastRunInfo(data = []) {
-  if (!currentLine) {
+function updateLastRunInfo() {
+  if (!currentLine || !lastRun[currentLine]) {
     document.getElementById("lastRun").innerHTML =
       "<small>No previous run</small>";
     return;
-  }
-
-  const entry = data.find(e => e.line === currentLine && e.last_run);
-  if (entry) {
-    const lr = entry.last_run;
-
-    lastRun[currentLine] = {
-      material: lr.material,
-      count: lr.count,
-      start: lr.start ? new Date(lr.start) : null,
-      end: lr.end ? new Date(lr.end) : null
-    };
   }
 
   const lr = lastRun[currentLine];
-  if (!lr) {
-    document.getElementById("lastRun").innerHTML =
-      "<small>No previous run</small>";
-    return;
-  }
 
   document.getElementById("lastRun").innerHTML = `
     <b>Material:</b> ${lr.material}<br>
     <b>Last Count:</b> ${lr.count}<br>
-    <b>Start:</b> ${lr.start ? lr.start.toLocaleString() : "N/A"}<br>
-    <b>End:</b> ${lr.end ? lr.end.toLocaleString() : "N/A"}
+    <b>Start:</b> ${lr.start.toLocaleString()}<br>
+    <b>End:</b> ${lr.end.toLocaleString()}
   `;
 }
 
@@ -366,6 +309,7 @@ loadLog();
 setInterval(loadLog, 5000);
 
 </script>
+
 </body>
 </html>
 
