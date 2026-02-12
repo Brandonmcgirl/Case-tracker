@@ -207,10 +207,33 @@ function startRun() {
 }
 
 /* ===== END RUN ===== */
-function endRun() {
+async function endRun() {
   if (!runStartTime) return alert("No active run");
 
+  const password = prompt("Enter password:");
+  if (password !== "tyvek") return alert("Wrong password");
+
+  // Call backend with endrun action
+  const res = await fetch(`${SERVER_URL}/add`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      entry: {},
+      reset: false,
+      line: currentLine,
+      action: "endrun",
+      password
+    })
+  });
+
+  const data = await res.json();
+
+  // Save last entry in lastRun info
   if (!lastRun[currentLine]) lastRun[currentLine] = {};
+  if (data.last_entry) {
+    lastRun[currentLine].material = data.last_entry.material;
+    lastRun[currentLine].count = data.last_entry.count;
+  }
   lastRun[currentLine].end = new Date();
 
   document.getElementById("lastRun").innerHTML = `
@@ -220,11 +243,16 @@ function endRun() {
     <b>End:</b> ${lastRun[currentLine].end.toLocaleString()}
   `;
 
+  // Reset frontend run state
   material = "";
   lastCount = null;
   runStartTime = null;
   document.getElementById("summary").innerHTML = "<small>Waiting for run...</small>";
+
+  // Reload log (will show only Init entry)
+  loadLog();
 }
+
 
 /* ===== ADD ENTRY ===== */
 function addEntry() {
