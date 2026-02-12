@@ -267,73 +267,49 @@ async function sendToServer(entry = {}, reset = false, line = "", action = "add"
 
 
 /* ===== LOAD LOG ===== */
-
 async function loadLog() {
-
   try {
-
     const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);
-
     const data = await res.json();
-
     populateLines(data);
-
     displayLog(data);
-
     updateLastRunInfo(data);
 
-
-
     // Detect active run for current line
-
     if (currentLine) {
-
       const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
-
-      if (activeStart) {
-
+      const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
+      
+      if (activeStart && !lastRunEntry) {
+        // Active run exists and hasn't been ended
         runStartTime = activeStart.timestamp
-
             ? new Date(activeStart.timestamp)
-
             : new Date(); // fallback if missing
-
         material = activeStart.material;
-
         
-
         // Find the latest count for this line
-
         const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
-
         if (lineEntries.length > 0) {
-
           const latestEntry = lineEntries[lineEntries.length - 1];
-
           lastCount = latestEntry.count;
-
         } else {
-
           lastCount = activeStart.count;
-
         }
-
         
-
         targetCount = activeStart.targetCount || null;
-
         updateSummary();
-
+      } else {
+        // No active run or run has been ended
+        runStartTime = null;
+        material = "";
+        lastCount = null;
+        targetCount = null;
+        updateSummary();
       }
-
     }
-
   } catch {
-
     document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
-
   }
-
 }
 
 
@@ -569,74 +545,44 @@ async function addEntry() {
 
 
 // ===== END RUN =====
-
 async function endRun() {
-
     if (!runStartTime) return alert("No active run");
-
-
 
     const data = await sendToServer({}, false, currentLine, "endrun", true);
 
-
-
     if (!data.error && data.last_run) {
-
         const lr = data.last_run;
-
         // parse start correctly
-
         const startDate = lr.start ? new Date(lr.start) : new Date();
-
         const endDate = lr.end ? new Date(lr.end) : new Date();
 
-
-
         lastRun[currentLine] = {
-
             material: lr.material,
-
             count: lr.count,
-
             start: startDate,
-
             end: endDate,
-
             targetCount: lr.targetCount
-
         };
-
         const l = lastRun[currentLine];
-
         document.getElementById("lastRun").innerHTML = `
-
             <b>Material:</b> ${l.material}<br>
-
             <b>Last Count:</b> ${l.count}<br>
-
             <b>Target Count:</b> ${l.targetCount || 'N/A'}<br>
-
             <b>Start:</b> ${l.start.toLocaleString()}<br>
-
             <b>End:</b> ${l.end.toLocaleString()}
-
         `;
 
-
-
         lastCount = l.count; // update lastCount so summary shows correctly until new run
-
         targetCount = l.targetCount;
-
     }
 
-
-
+    // Clear run state immediately
     runStartTime = null;
-
+    material = "";
+    await loadLog(); // Force refresh to update UI
     updateSummary();
-
 }
+
 
 
 
