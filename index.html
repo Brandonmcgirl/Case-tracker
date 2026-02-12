@@ -76,9 +76,9 @@ const startCountInput = document.getElementById("startCount");
 const timeInput = document.getElementById("time");
 const countInput = document.getElementById("count");
 
-/* ===== LIVE CLOCK ===== */
+/* ===== CLOCK ===== */
 function getNow() {
-  return new Date(); // single source of truth
+  return new Date();
 }
 
 function updateClock() {
@@ -135,14 +135,43 @@ async function loadLog() {
 
     populateLines(data);
     displayLog(data);
-    updateLastRunInfo(data);
+    extractLastRun(data);
 
   } catch {
     document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
   }
 }
 
-/* ===== LINES ===== */
+/* ===== LINE MANAGEMENT ===== */
+async function addLine() {
+  const name = document.getElementById("newLine").value.trim();
+  if (!name) return alert("Enter line name");
+
+  currentLine = name;
+
+  const entry = {
+    timestamp: getNow().toISOString(),
+    time: "Init",
+    material: "-",
+    count: 0,
+    diff: 0,
+    line: currentLine
+  };
+
+  await sendToServer(entry, true, currentLine, "add", true);
+  document.getElementById("newLine").value = "";
+}
+
+async function deleteLine() {
+  if (!currentLine) return alert("Select a line first");
+  await sendToServer({}, false, currentLine, "delete", true);
+  currentLine = "";
+  lastCount = null;
+  material = "";
+  runStartTime = null;
+  loadLog();
+}
+
 function populateLines(data) {
   lines = [...new Set(data.map(e => e.line))].filter(Boolean);
   const old = lineSelect.value;
@@ -167,18 +196,6 @@ function lineChanged() {
   material = "";
   runStartTime = null;
   updateSummary();
-  document.getElementById("log").innerHTML = "";
-}
-
-/* ===== SUMMARY ===== */
-function updateSummary() {
-  const summary = document.getElementById("summary");
-  if (currentLine && lastCount !== null) {
-    summary.innerHTML =
-      `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
-  } else {
-    summary.innerHTML = "<small>Waiting for run...</small>";
-  }
 }
 
 /* ===== START RUN ===== */
@@ -189,7 +206,6 @@ async function startRun() {
   lastCount = parseInt(startCountInput.value);
   if (!material || isNaN(lastCount)) return alert("Invalid setup");
 
-  // 🔥 EXACT LIVE CLOCK TIME
   runStartTime = getNow();
 
   const entry = {
@@ -198,7 +214,6 @@ async function startRun() {
     material,
     count: lastCount,
     diff: 0,
-    start_time: runStartTime.toISOString(),
     line: currentLine
   };
 
@@ -237,35 +252,15 @@ async function addEntry() {
 
 /* ===== END RUN ===== */
 async function endRun() {
-  if (!runStartTime) return alert("No active run");
+  if (!currentLine) return alert("Select a line first");
 
-  const runEndTime = getNow(); // 🔥 EXACT LIVE CLOCK TIME
-
-  const entry = {
-    timestamp: runEndTime.toISOString(),
-    time: "End",
-    material,
-    count: lastCount,
-    diff: 0,
-    end_time: runEndTime.toISOString(),
-    line: currentLine
-  };
-
-  await sendToServer(entry, false, currentLine, "add", true);
-
-  lastRun[currentLine] = {
-    material,
-    count: lastCount,
-    start: runStartTime,
-    end: runEndTime
-  };
-
-  lastCount = null;
-  material = "";
-  runStartTime = null;
-
-  updateSummary();
-  updateLastRunInfo();
+  const data = await sendToServer({}, false, currentLine, "endrun", true);
+  if (!data.error) {
+    lastCount = null;
+    material = "";
+    runStartTime = null;
+    updateSummary();
+  }
 }
 
 /* ===== DISPLAY LOG ===== */
@@ -275,33 +270,51 @@ function displayLog(data = []) {
   if (!currentLine) return;
 
   data
-    .filter(e => e.line === currentLine)
+    .filter(e => e.line === currentLine && !e.last_run)
     .sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
     .forEach(e => {
       const d = document.createElement("div");
       d.className = "log-entry";
+
+      const diffText = e.diff > 0 ? `(+${e.diff})`
+                       : e.diff < 0 ? `(${e.diff})`
+                       : `(0)`;
+
       d.innerHTML =
-        `${e.time} | ${e.material} | ${e.count} <b>(+${e.diff || 0})</b>`;
+        `${e.time} | ${e.material} | ${e.count} <b>${diffText}</b>`;
       logDiv.appendChild(d);
     });
 }
 
-/* ===== LAST RUN INFO ===== */
-function updateLastRunInfo() {
-  if (!currentLine || !lastRun[currentLine]) {
-    document.getElementById("lastRun").innerHTML =
-      "<small>No previous run</small>";
+/* ===== LAST RUN ===== */
+function extractLastRun(data) {
+  const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
+  const el = document.getElementById("lastRun");
+
+  if (!lastRunEntry || !lastRunEntry.last_run) {
+    el.innerHTML = "<small>No previous run</small>";
     return;
   }
 
-  const lr = lastRun[currentLine];
+  const lr = lastRunEntry.last_run;
 
-  document.getElementById("lastRun").innerHTML = `
+  el.innerHTML = `
     <b>Material:</b> ${lr.material}<br>
     <b>Last Count:</b> ${lr.count}<br>
-    <b>Start:</b> ${lr.start.toLocaleString()}<br>
-    <b>End:</b> ${lr.end.toLocaleString()}
+    <b>Start:</b> ${lr.start}<br>
+    <b>End:</b> ${lr.end}
   `;
+}
+
+/* ===== SUMMARY ===== */
+function updateSummary() {
+  const summary = document.getElementById("summary");
+  if (currentLine && lastCount !== null) {
+    summary.innerHTML =
+      `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
+  } else {
+    summary.innerHTML = "<small>Waiting for run...</small>";
+  }
 }
 
 /* ===== INIT ===== */
@@ -312,4 +325,3 @@ setInterval(loadLog, 5000);
 
 </body>
 </html>
-
