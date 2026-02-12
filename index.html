@@ -147,20 +147,29 @@ async function addLine() {
   const name = document.getElementById("newLine").value.trim();
   if (!name) return alert("Enter line name");
 
-  currentLine = name;
-
   const entry = {
     timestamp: getNow().toISOString(),
     time: "Init",
     material: "-",
     count: 0,
     diff: 0,
-    line: currentLine
+    line: name
   };
 
-  await sendToServer(entry, false, currentLine, "add", true);
+  const data = await sendToServer(entry, false, name, "add", true);
+  if (data && !data.error) {
+    await loadLog();
+
+    // 🔥 Force select the new line
+    currentLine = name;
+    lineSelect.value = name;
+
+    updateSummary();
+  }
+
   document.getElementById("newLine").value = "";
 }
+
 
 async function deleteLine() {
   if (!currentLine) return alert("Select a line first");
