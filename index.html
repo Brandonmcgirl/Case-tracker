@@ -1,426 +1,751 @@
 <!DOCTYPE html>
+
 <html lang="en">
+
 <head>
+
 <meta charset="UTF-8">
+
 <title>Hourly Case Tracker</title>
+
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <style>
+
 * { box-sizing: border-box; }
+
 body { font-family: Arial; background: #0f172a; color: #e5e7eb; padding: 20px; }
+
 input, button, select { width: 100%; padding: 10px; margin: 6px 0; font-size: 16px; }
+
 button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+
 button.reset { background: #dc2626; }
+
 .card { background: #020617; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+
 .log { border-top: 1px solid #334155; margin-top: 10px; padding-top: 10px; }
+
 .log-entry { margin-bottom: 6px; }
+
 small { color: #94a3b8; }
+
 </style>
+
 </head>
+
 <body>
+
+
 
 <h1>Hourly Case Tracker</h1>
 
+
+
 <div class="card">
+
   <h3>Line Selection</h3>
+
   <select id="lineSelect" onchange="lineChanged()">
+
     <option value="">-- Select Line --</option>
+
   </select>
+
   <input id="newLine" placeholder="New Line Name / Number">
+
   <button onclick="addLine()">Add Line</button>
+
   <button onclick="deleteLine()" class="reset">Delete Line</button>
+
 </div>
 
+
+
 <div class="card">
+
   <h3>Run Setup</h3>
+
   <input id="material" placeholder="Material Code">
+
   <input id="startCount" type="number" placeholder="Starting Case Count">
+
   <input id="targetCount" type="number" placeholder="Target Case Count (optional)">
+
   <button onclick="startRun()">Start Run</button>
+
 </div>
 
+
+
 <div class="card">
+
   <h3>Hourly Entry</h3>
+
   <input id="time" placeholder="Time (7am, 7:30)">
+
   <input id="count" type="number" placeholder="Current Case Count">
+
   <button onclick="addEntry()">Add Entry</button>
+
 </div>
 
+
+
 <div class="card">
+
   <h3>Log</h3>
+
   <div id="liveTime"><small></small></div>
+
   <div id="summary"><small>Waiting for run...</small></div>
+
   <div id="log" class="log"></div>
+
 </div>
 
+
+
 <div class="card">
+
   <h3>Last Run Info</h3>
+
   <div id="lastRun"><small>No previous run</small></div>
+
 </div>
+
+
 
 <button class="reset" onclick="endRun()">End Of Run</button>
 
+
+
 <script>
+
 /* ===== STATE ===== */
+
 let lines = [];
+
 let currentLine = "";
+
 let lastCount = null;
+
 let targetCount = null;
+
 let material = "";
+
 let runStartTime = null;
+
 let lastRun = {}; // per line
+
 const SERVER_URL = "https://cases.hytalesanarchy.com";
 
+
+
 /* ===== DOM ===== */
+
 const lineSelect = document.getElementById("lineSelect");
+
 const materialInput = document.getElementById("material");
+
 const startCountInput = document.getElementById("startCount");
+
 const targetCountInput = document.getElementById("targetCount");
+
 const timeInput = document.getElementById("time");
+
 const countInput = document.getElementById("count");
 
+
+
 /* ===== LIVE CLOCK ===== */
+
 function updateClock() {
+
   const now = new Date();
+
   document.getElementById("liveTime").innerHTML =
+
     `<small>${now.toDateString()} (${now.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})})</small>`;
+
 }
+
 setInterval(updateClock, 60000);
+
 updateClock();
 
+
+
 /* ===== PASSWORD PROMPT ===== */
+
 async function getPassword(promptMsg = "Enter password:") {
+
   const pw = prompt(promptMsg);
+
   if (!pw) throw new Error("Password required");
+
   return pw;
+
 }
+
+
 
 /* ===== SERVER COMMUNICATION ===== */
+
 async function sendToServer(entry = {}, reset = false, line = "", action = "add", requirePassword = true) {
+
   if (!line) {
+
     alert("No line selected!");
+
     return { error: "No line selected" };
+
   }
+
+
 
   let password = "";
+
   if (requirePassword) {
+
     try {
+
       password = await getPassword();
+
     } catch (err) {
+
       alert("Password is required for this action.");
+
       return { error: "Password required" };
+
     }
+
   }
 
+
+
   try {
+
     const res = await fetch(`${SERVER_URL}/add`, {
+
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json"
-      },
+
+      headers: { "Content-Type": "application/json" },
+
       body: JSON.stringify({ entry, reset, line, action, password })
+
     });
 
+
+
     if (res.status === 403) {
+
       alert("Wrong password!");
+
       return { error: "Forbidden" };
-    }
-    
-    if (res.status === 400) {
-      const errorData = await res.json();
-      alert(errorData.error || "Bad request");
-      return { error: "Bad request" };
+
     }
 
+
+
     const data = await res.json();
+
     await loadLog(); // refresh log immediately after success
+
     return data;
+
   } catch (err) {
+
     alert("Server unreachable");
+
     return { error: "Server unreachable" };
+
   }
+
 }
+
+
 
 /* ===== LOAD LOG ===== */
+
 async function loadLog() {
+
   try {
-    const res = await fetch(`${SERVER_URL}/log.json`);
+
+    const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);
+
     const data = await res.json();
+
     populateLines(data);
+
     displayLog(data);
+
     updateLastRunInfo(data);
 
+
+
     // Detect active run for current line
+
     if (currentLine) {
-      // Get all entries for this line
-      const lineEntries = data.filter(e => e.line === currentLine);
-      
-      // Find all Start entries for this line
-      const startEntries = lineEntries.filter(e => e.time === "Start");
-      
-      // Find last_run entry for this line
-      const lastRunEntry = lineEntries.find(e => e.last_run);
-      
-      // If we have Start entries and either no last_run or fewer last_runs than Starts
-      if (startEntries.length > 0) {
-        const hasActiveRun = !lastRunEntry || (
-          startEntries.length > (lastRunEntry ? 1 : 0)
-        );
+
+      const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
+
+      if (activeStart) {
+
+        runStartTime = activeStart.timestamp
+
+            ? new Date(activeStart.timestamp)
+
+            : new Date(); // fallback if missing
+
+        material = activeStart.material;
+
         
-        if (hasActiveRun) {
-          // Get the most recent Start entry
-          const latestStart = startEntries[startEntries.length - 1];
-          
-          runStartTime = latestStart.timestamp
-              ? new Date(latestStart.timestamp)
-              : new Date();
-          material = latestStart.material;
-          
-          // Find the latest count entry for this run
-          const entriesForCurrentRun = lineEntries.filter(e => {
-            if (e.time === "Init" || e.time === "Start" || e.last_run) return false;
-            // Simple approach: include entries that came after the Start
-            return true;
-          });
-          
-          if (entriesForCurrentRun.length > 0) {
-            const latestEntry = entriesForCurrentRun[entriesForCurrentRun.length - 1];
-            lastCount = latestEntry.count;
-          } else {
-            lastCount = latestStart.count;
-          }
-          
-          targetCount = latestStart.targetCount || null;
-          updateSummary();
+
+        // Find the latest count for this line
+
+        const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
+
+        if (lineEntries.length > 0) {
+
+          const latestEntry = lineEntries[lineEntries.length - 1];
+
+          lastCount = latestEntry.count;
+
         } else {
-          // No active run
-          runStartTime = null;
-          material = "";
-          lastCount = null;
-          targetCount = null;
-          updateSummary();
+
+          lastCount = activeStart.count;
+
         }
-      } else {
-        // No Start entries at all
-        runStartTime = null;
-        material = "";
-        lastCount = null;
-        targetCount = null;
+
+        
+
+        targetCount = activeStart.targetCount || null;
+
         updateSummary();
+
       }
+
     }
-  } catch (err) {
-    console.error("Load log error:", err);
+
+  } catch {
+
     document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
+
   }
+
 }
+
+
 
 /* ===== LINES ===== */
+
 function populateLines(data) {
+
   lines = [...new Set(data.map(e => e.line))].filter(Boolean);
+
   const old = lineSelect.value;
+
   lineSelect.innerHTML = '<option value="">-- Select Line --</option>';
+
   lines.forEach(l => {
+
     const o = document.createElement("option");
+
     o.value = l; o.text = l; lineSelect.appendChild(o);
+
   });
+
   if (lines.includes(old)) { lineSelect.value = old; currentLine = old; }
+
 }
+
+
 
 function lineChanged() {
+
   currentLine = lineSelect.value;
+
   lastCount = null; targetCount = null; material = ""; runStartTime = null;
+
   updateSummary();
+
   displayLog([]);
+
   updateLastRunInfo();
+
 }
+
+
 
 /* ===== SUMMARY UPDATE ===== */
+
 function updateSummary() {
+
   const summary = document.getElementById("summary");
-  if (currentLine && material && runStartTime) {
+
+  if (currentLine && material) {
+
     let summaryHTML = `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount !== null ? lastCount : 'N/A'}`;
+
     if (targetCount !== null) {
+
       summaryHTML += `<br><b>Target Count:</b> ${targetCount}`;
+
     }
+
     summary.innerHTML = summaryHTML;
+
   } else {
+
     summary.innerHTML = "<small>Waiting for run...</small>";
+
   }
+
 }
+
+
 
 /* ===== ADD / DELETE LINE ===== */
+
 async function addLine() {
+
   const name = document.getElementById("newLine").value.trim();
+
   if (!name) return alert("Enter a line name");
+
   currentLine = name;
+
   document.getElementById("newLine").value = "";
 
+
+
   const entry = {
+
     date: new Date().toDateString(),
+
     time: "Init",
+
     material: "-",
+
     count: 0,
+
     diff: 0,
+
     line: currentLine
+
   };
 
+
+
   await sendToServer(entry, false, currentLine, "add", true);
+
 }
 
+
+
 async function deleteLine() {
+
   if (!currentLine) return alert("Select a line first");
+
   if (!confirm(`Delete line "${currentLine}"?`)) return;
+
+
 
   await sendToServer({}, true, currentLine, "delete", true);
 
+
+
   currentLine = "";
+
   lastCount = null; targetCount = null; material = ""; runStartTime = null;
+
   updateSummary();
+
   document.getElementById("log").innerHTML = "";
+
   document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
+
 }
+
+
 
 /* ===== START RUN ===== */
+
 async function startRun() {
+
   if (!currentLine) return alert("Select a line first");
+
   material = materialInput.value.trim();
+
   lastCount = parseInt(startCountInput.value) || 0;
+
   targetCount = parseInt(targetCountInput.value) || null;
+
   if (!material) return alert("Invalid setup");
 
+  runStartTime = new Date();
+
+
+
   const entry = {
+
     date: new Date().toDateString(),
+
     time: "Start",
+
     material,
+
     count: lastCount,
+
     diff: 0,
+
     line: currentLine,
+
     targetCount: targetCount
+
   };
 
-  const data = await sendToServer(entry, false, currentLine, "add", true);
-  if (!data.error) {
-    runStartTime = new Date(); // Set locally after successful start
-    updateSummary();
-  }
+
+
+  await sendToServer(entry, false, currentLine, "add", true);
+
+  updateSummary();
+
 }
+
+
 
 /* ===== ADD ENTRY ===== */
+
 async function addEntry() {
-  if (!currentLine || !runStartTime) return alert("Start a run first");
+
+  if (!currentLine) return alert("Start a run first");
+
   const time = timeInput.value.trim();
+
   const count = parseInt(countInput.value);
+
   if (!time || isNaN(count)) return alert("Invalid entry");
 
+
+
   const diff = count - (lastCount || 0);
+
   const entry = {
+
     date: new Date().toDateString(),
+
     time,
+
     material,
+
     count,
+
     diff,
+
     line: currentLine
+
   };
 
+
+
   const data = await sendToServer(entry, false, currentLine, "add", true);
+
   if (!data.error) {
+
     lastCount = count;
+
     updateSummary();
+
     timeInput.value = "";
+
     countInput.value = "";
+
   }
+
 }
 
+
+
 // ===== END RUN =====
+
 async function endRun() {
+
     if (!runStartTime) return alert("No active run");
+
+
 
     const data = await sendToServer({}, false, currentLine, "endrun", true);
 
+
+
     if (!data.error && data.last_run) {
+
         const lr = data.last_run;
+
         // parse start correctly
+
         const startDate = lr.start ? new Date(lr.start) : new Date();
+
         const endDate = lr.end ? new Date(lr.end) : new Date();
 
+
+
         lastRun[currentLine] = {
+
             material: lr.material,
+
             count: lr.count,
+
             start: startDate,
+
             end: endDate,
+
             targetCount: lr.targetCount
+
         };
+
         const l = lastRun[currentLine];
+
         document.getElementById("lastRun").innerHTML = `
+
             <b>Material:</b> ${l.material}<br>
+
             <b>Last Count:</b> ${l.count}<br>
+
             <b>Target Count:</b> ${l.targetCount || 'N/A'}<br>
+
             <b>Start:</b> ${l.start.toLocaleString()}<br>
+
             <b>End:</b> ${l.end.toLocaleString()}
+
         `;
 
+
+
         lastCount = l.count; // update lastCount so summary shows correctly until new run
+
         targetCount = l.targetCount;
+
     }
 
-    // Clear run state
+
+
     runStartTime = null;
-    material = "";
+
     updateSummary();
+
 }
+
+
+
 
 
 /* ===== DISPLAY LOG ===== */
+
 function displayLog(data = []) {
+
   const logDiv = document.getElementById("log");
+
   logDiv.innerHTML = "";
+
   if (!currentLine) return;
 
+
+
   data.filter(e => e.line === currentLine && !e.last_run).forEach(e => {
+
     const d = document.createElement("div");
+
     d.className = "log-entry";
+
     d.innerHTML = `${e.time} | ${e.material} | ${e.count} <b>(+${e.diff || 0})</b>`;
+
     logDiv.appendChild(d);
+
   });
+
 }
+
+
 
 /* ===== LAST RUN INFO ===== */
+
 function updateLastRunInfo(data = []) {
+
   if (!currentLine) {
+
     document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
+
     return;
+
   }
+
+
 
   const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
+
   if (lastRunEntry) {
+
     const lr = lastRunEntry.last_run;
+
     lastRun[currentLine] = {
+
       material: lr.material,
+
       count: lr.count,
+
       start: new Date(lr.start),
+
       end: new Date(lr.end),
+
       targetCount: lr.targetCount
+
     };
+
   }
+
+
 
   if (lastRun[currentLine]) {
+
     const lr = lastRun[currentLine];
+
     document.getElementById("lastRun").innerHTML = `
+
       <b>Material:</b> ${lr.material}<br>
+
       <b>Last Count:</b> ${lr.count}<br>
+
       <b>Target Count:</b> ${lr.targetCount || 'N/A'}<br>
+
       <b>Start:</b> ${lr.start.toLocaleString()}<br>
+
       <b>End:</b> ${lr.end.toLocaleString()}
+
     `;
+
   } else {
+
     document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
+
   }
+
 }
 
+
+
 /* ===== INIT ===== */
+
 loadLog();
-setInterval(loadLog, 2000); // Refresh every 2 seconds for better sync
+
+setInterval(loadLog, 5000); // refresh log every 5 seconds
+
 </script>
 
+
+
 </body>
+
 </html>
