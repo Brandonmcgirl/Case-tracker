@@ -158,7 +158,7 @@ async function addLine() {
     line: currentLine
   };
 
-  await sendToServer(entry, true, currentLine, "add", true);
+  await sendToServer(entry, false, currentLine, "add", true);
   document.getElementById("newLine").value = "";
 }
 
