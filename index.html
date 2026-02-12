@@ -4,45 +4,20 @@
 <meta charset="UTF-8">
 <title>Hourly Case Tracker</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <style>
 * { box-sizing: border-box; }
-body {
-  font-family: Arial, sans-serif;
-  background: #0f172a;
-  color: #e5e7eb;
-  padding: 20px;
-}
-input, button, select {
-  width: 100%;
-  padding: 10px;
-  margin: 6px 0;
-  font-size: 16px;
-}
-button {
-  background: #2563eb;
-  color: white;
-  border: none;
-  border-radius: 6px;
-}
+body { font-family: Arial; background: #0f172a; color: #e5e7eb; padding: 20px; }
+input, button, select { width: 100%; padding: 10px; margin: 6px 0; font-size: 16px; }
+button { background: #2563eb; color: white; border: none; border-radius: 6px; }
 button.reset { background: #dc2626; }
-.card {
-  background: #020617;
-  padding: 15px;
-  border-radius: 10px;
-  margin-bottom: 15px;
-}
-.log {
-  border-top: 1px solid #334155;
-  margin-top: 10px;
-  padding-top: 10px;
-}
+.card { background: #020617; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+.log { border-top: 1px solid #334155; margin-top: 10px; padding-top: 10px; }
 .log-entry { margin-bottom: 6px; }
 small { color: #94a3b8; }
 </style>
 </head>
-
 <body>
+
 <h1>Hourly Case Tracker</h1>
 
 <div class="card">
@@ -84,33 +59,27 @@ small { color: #94a3b8; }
 <button class="reset" onclick="endRun()">End Of Run</button>
 
 <script>
-/* ===== STATE ===== */
 let lines = [];
 let currentLine = "";
 let lastCount = null;
 let material = "";
 let runStartTime = null;
 let lastRun = {}; // per line
-
 const SERVER_URL = "https://cases.hytalesanarchy.com";
 
-/* ===== DOM ===== */
 const lineSelect = document.getElementById("lineSelect");
 const materialInput = document.getElementById("material");
 const startCountInput = document.getElementById("startCount");
 const timeInput = document.getElementById("time");
 const countInput = document.getElementById("count");
 
-/* ===== LIVE CLOCK ===== */
 function updateClock() {
   const now = new Date();
   document.getElementById("liveTime").innerHTML =
     `<small>${now.toDateString()} (${now.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})})</small>`;
 }
-setInterval(updateClock, 60000);
-updateClock();
+setInterval(updateClock, 60000); updateClock();
 
-/* ===== LOAD LOG ===== */
 async function loadLog() {
   try {
     const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);
@@ -123,40 +92,30 @@ async function loadLog() {
   }
 }
 
-/* ===== LINES ===== */
 function populateLines(data) {
   lines = [...new Set(data.map(e => e.line))].filter(Boolean);
   const old = lineSelect.value;
   lineSelect.innerHTML = '<option value="">-- Select Line --</option>';
   lines.forEach(l => {
     const o = document.createElement("option");
-    o.value = l;
-    o.text = l;
-    lineSelect.appendChild(o);
+    o.value = l; o.text = l; lineSelect.appendChild(o);
   });
-  if (lines.includes(old)) {
-    lineSelect.value = old;
-    currentLine = old;
-  }
+  if (lines.includes(old)) { lineSelect.value = old; currentLine = old; }
 }
 
 function lineChanged() {
   currentLine = lineSelect.value;
-  lastCount = null;
-  material = "";
-  runStartTime = null;
+  lastCount = null; material = ""; runStartTime = null;
   document.getElementById("summary").innerHTML = "<small>Waiting for run...</small>";
-  displayLog([]); 
+  displayLog([]);
   updateLastRunInfo();
 }
 
-/* ===== ADD LINE ===== */
 function addLine() {
   const name = document.getElementById("newLine").value.trim();
   if (!name) return alert("Enter a line name");
   currentLine = name;
   document.getElementById("newLine").value = "";
-
   promptAndSend({
     date: new Date().toDateString(),
     time: "Init",
@@ -167,32 +126,25 @@ function addLine() {
   });
 }
 
-/* ===== DELETE LINE ===== */
 function deleteLine() {
   if (!currentLine) return alert("Select a line first");
   if (!confirm(`Delete line "${currentLine}"?`)) return;
-
   promptAndSend({}, true, currentLine, "delete");
   currentLine = "";
   document.getElementById("log").innerHTML = "";
   document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
 }
 
-/* ===== START RUN ===== */
 function startRun() {
   if (!currentLine) return alert("Select a line first");
-
   material = materialInput.value;
   lastCount = parseInt(startCountInput.value);
   if (!material || isNaN(lastCount)) return alert("Invalid setup");
-
   runStartTime = new Date();
-
   if (!lastRun[currentLine]) lastRun[currentLine] = {};
   lastRun[currentLine].material = material;
   lastRun[currentLine].count = lastCount;
   lastRun[currentLine].start = runStartTime;
-
   promptAndSend({
     date: new Date().toDateString(),
     time: "Start",
@@ -201,95 +153,60 @@ function startRun() {
     diff: 0,
     line: currentLine
   });
-
   document.getElementById("summary").innerHTML =
     `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
 }
 
-/* ===== END RUN ===== */
 async function endRun() {
   if (!runStartTime) return alert("No active run");
-
   const password = prompt("Enter password:");
   if (password !== "tyvek") return alert("Wrong password");
-
-  // Call backend with endrun action
   const res = await fetch(`${SERVER_URL}/add`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      entry: {},
-      reset: false,
-      line: currentLine,
-      action: "endrun",
-      password
-    })
+    body: JSON.stringify({ entry: {}, reset: false, line: currentLine, action: "endrun", password })
   });
-
   const data = await res.json();
-
-  // Save last entry in lastRun info
-  if (!lastRun[currentLine]) lastRun[currentLine] = {};
-  if (data.last_entry) {
-    lastRun[currentLine].material = data.last_entry.material;
-    lastRun[currentLine].count = data.last_entry.count;
+  if (data.last_run) {
+    lastRun[currentLine] = {
+      material: data.last_run.material,
+      count: data.last_run.count,
+      start: new Date(data.last_run.start),
+      end: new Date(data.last_run.end)
+    };
+    const lr = lastRun[currentLine];
+    document.getElementById("lastRun").innerHTML = `
+      <b>Material:</b> ${lr.material}<br>
+      <b>Last Count:</b> ${lr.count}<br>
+      <b>Start:</b> ${lr.start.toLocaleString()}<br>
+      <b>End:</b> ${lr.end.toLocaleString()}
+    `;
   }
-  lastRun[currentLine].end = new Date();
-
-  document.getElementById("lastRun").innerHTML = `
-    <b>Material:</b> ${lastRun[currentLine].material}<br>
-    <b>Last Count:</b> ${lastRun[currentLine].count}<br>
-    <b>Start:</b> ${lastRun[currentLine].start.toLocaleString()}<br>
-    <b>End:</b> ${lastRun[currentLine].end.toLocaleString()}
-  `;
-
-  // Reset frontend run state
-  material = "";
-  lastCount = null;
-  runStartTime = null;
+  material = ""; lastCount = null; runStartTime = null;
   document.getElementById("summary").innerHTML = "<small>Waiting for run...</small>";
-
-  // Reload log (will show only Init entry)
   loadLog();
 }
 
-
-/* ===== ADD ENTRY ===== */
 function addEntry() {
   if (!currentLine || lastCount === null) return alert("Start a run first");
-  const time = timeInput.value;
-  const count = parseInt(countInput.value);
+  const time = timeInput.value; const count = parseInt(countInput.value);
   if (!time || isNaN(count)) return;
-
-  const diff = count - lastCount;
-  lastCount = count;
-
+  const diff = count - lastCount; lastCount = count;
   if (!lastRun[currentLine]) lastRun[currentLine] = {};
   lastRun[currentLine].count = lastCount;
-
   promptAndSend({
     date: new Date().toDateString(),
-    time,
-    material,
-    count,
-    diff,
-    line: currentLine
+    time, material, count, diff, line: currentLine
   });
-
-  timeInput.value = "";
-  countInput.value = "";
-
+  timeInput.value = ""; countInput.value = "";
   document.getElementById("summary").innerHTML =
     `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
 }
 
-/* ===== DISPLAY LOG ===== */
 function displayLog(data = []) {
-  const logDiv = document.getElementById("log");
-  logDiv.innerHTML = "";
+  const logDiv = document.getElementById("log"); logDiv.innerHTML = "";
   if (!currentLine) return;
-
-  data.filter(e => e.line === currentLine).forEach(e => {
+  data.filter(e => e.line === currentLine && !e.last_run).forEach(e => {
     const d = document.createElement("div");
     d.className = "log-entry";
     d.innerHTML = `${e.time} | ${e.material} | ${e.count} <b>(+${e.diff || 0})</b>`;
@@ -297,26 +214,21 @@ function displayLog(data = []) {
   });
 }
 
-/* ===== UPDATE LAST RUN INFO ===== */
 function updateLastRunInfo(data = []) {
   if (!currentLine) {
     document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
     return;
   }
-
-  if (!lastRun[currentLine] && data.length) {
-    const entries = data.filter(e => e.line === currentLine);
-    if (entries.length) {
-      const lastEntry = entries.at(-1);
-      lastRun[currentLine] = {
-        material: lastEntry.material,
-        count: lastEntry.count,
-        start: new Date(lastEntry.date),
-        end: new Date()
-      };
-    }
+  const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
+  if (lastRunEntry) {
+    const lr = lastRunEntry.last_run;
+    lastRun[currentLine] = {
+      material: lr.material,
+      count: lr.count,
+      start: new Date(lr.start),
+      end: new Date(lr.end)
+    };
   }
-
   if (lastRun[currentLine]) {
     const lr = lastRun[currentLine];
     document.getElementById("lastRun").innerHTML = `
@@ -330,29 +242,18 @@ function updateLastRunInfo(data = []) {
   }
 }
 
-/* ===== SERVER PROMPT & SEND ===== */
 async function promptAndSend(entry, reset = false, line = "", action = "add") {
   const password = prompt("Enter password:");
   if (password !== "tyvek") return alert("Wrong password");
-
   await fetch(`${SERVER_URL}/add`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      entry,
-      reset,
-      line: line || currentLine,
-      action,
-      password
-    })
+    body: JSON.stringify({ entry, reset, line: line || currentLine, action, password })
   });
-
   loadLog();
 }
 
-/* ===== INIT ===== */
-loadLog();
-setInterval(loadLog, 10000);
+loadLog(); setInterval(loadLog, 10000);
 </script>
 </body>
 </html>
