@@ -122,6 +122,12 @@ async function sendToServer(entry = {}, reset = false, line = "", action = "add"
       alert("Wrong password!");
       return { error: "Forbidden" };
     }
+    
+    if (res.status === 400) {
+      const errorData = await res.json();
+      alert(errorData.error || "Bad request");
+      return { error: "Bad request" };
+    }
 
     const data = await res.json();
     await loadLog(); // refresh log immediately after success
@@ -144,7 +150,10 @@ async function loadLog() {
     // Detect active run for current line
     if (currentLine) {
       const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
-      if (activeStart) {
+      const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
+      
+      if (activeStart && !lastRunEntry) {
+        // Active run exists and hasn't been ended
         runStartTime = activeStart.timestamp
             ? new Date(activeStart.timestamp)
             : new Date(); // fallback if missing
@@ -160,6 +169,13 @@ async function loadLog() {
         }
         
         targetCount = activeStart.targetCount || null;
+        updateSummary();
+      } else {
+        // No active run or run has been ended
+        runStartTime = null;
+        material = "";
+        lastCount = null;
+        targetCount = null;
         updateSummary();
       }
     }
@@ -191,7 +207,7 @@ function lineChanged() {
 /* ===== SUMMARY UPDATE ===== */
 function updateSummary() {
   const summary = document.getElementById("summary");
-  if (currentLine && material) {
+  if (currentLine && material && runStartTime) {
     let summaryHTML = `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount !== null ? lastCount : 'N/A'}`;
     if (targetCount !== null) {
       summaryHTML += `<br><b>Target Count:</b> ${targetCount}`;
@@ -241,7 +257,6 @@ async function startRun() {
   lastCount = parseInt(startCountInput.value) || 0;
   targetCount = parseInt(targetCountInput.value) || null;
   if (!material) return alert("Invalid setup");
-  runStartTime = new Date();
 
   const entry = {
     date: new Date().toDateString(),
@@ -253,13 +268,16 @@ async function startRun() {
     targetCount: targetCount
   };
 
-  await sendToServer(entry, false, currentLine, "add", true);
-  updateSummary();
+  const data = await sendToServer(entry, false, currentLine, "add", true);
+  if (!data.error) {
+    runStartTime = new Date(); // Set locally after successful start
+    updateSummary();
+  }
 }
 
 /* ===== ADD ENTRY ===== */
 async function addEntry() {
-  if (!currentLine) return alert("Start a run first");
+  if (!currentLine || !runStartTime) return alert("Start a run first");
   const time = timeInput.value.trim();
   const count = parseInt(countInput.value);
   if (!time || isNaN(count)) return alert("Invalid entry");
@@ -315,7 +333,9 @@ async function endRun() {
         targetCount = l.targetCount;
     }
 
+    // Clear run state
     runStartTime = null;
+    material = "";
     updateSummary();
 }
 
