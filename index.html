@@ -244,33 +244,45 @@ function displayLog(data = []) {
   logDiv.innerHTML = "";
   if (!currentLine) return;
 
-  data
-    .filter(e => e.line === currentLine && !e.last_run)
-    .sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
-    .forEach(e => {
-      const d = document.createElement("div");
-      d.className = "log-entry";
+  // Only show entries that are not part of completed runs
+  const entries = data
+    .filter(e => e.line === currentLine && !e.last_run && e.time !== "Init")
+    .sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
 
-      const diffText = e.diff > 0 ? `(+${e.diff})`
-                       : e.diff < 0 ? `(${e.diff})`
-                       : `(0)`;
+  entries.forEach(e => {
+    const d = document.createElement("div");
+    d.className = "log-entry";
 
-      d.innerHTML = `${e.time} | ${e.material} | ${e.count} <b>${diffText}</b>`;
-      logDiv.appendChild(d);
-    });
+    const diffText = e.diff > 0 ? `(+${e.diff})`
+                     : e.diff < 0 ? `(${e.diff})`
+                     : `(0)`;
+
+    d.innerHTML = `${e.time} | ${e.material} | ${e.count} <b>${diffText}</b>`;
+    logDiv.appendChild(d);
+  });
 }
 
 /* ===== LAST RUN ===== */
 function extractLastRun(data) {
-  const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
   const el = document.getElementById("lastRun");
+  if (!currentLine) {
+    el.innerHTML = "<small>No previous run</small>";
+    return;
+  }
 
+  // Find last_run entry for this line
+  const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
   if (!lastRunEntry || !lastRunEntry.last_run) {
     el.innerHTML = "<small>No previous run</small>";
     return;
   }
 
   const lr = lastRunEntry.last_run;
+
+  // Get the last count from log entries in this run
+  const runEntries = data.filter(e => e.line === currentLine && !e.last_run && new Date(e.timestamp) >= new Date(lr.start) && new Date(e.timestamp) <= new Date(lr.end));
+  const finalCount = runEntries.length ? runEntries[runEntries.length - 1].count : lr.count;
+
   const startLocal = new Date(lr.start).toLocaleString([], {year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
   const endLocal   = new Date(lr.end).toLocaleString([], {year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
 
@@ -283,12 +295,13 @@ function extractLastRun(data) {
 
   el.innerHTML = `
     <b>Material:</b> ${lr.material}<br>
-    <b>Last Count:</b> ${lr.count}<br>
+    <b>Last Count:</b> ${finalCount}<br>
     <b>Start:</b> ${startLocal}<br>
     <b>End:</b> ${endLocal}<br>
     <b>Duration:</b> ${durationStr}
   `;
 }
+
 
 /* ===== SUMMARY ===== */
 function updateSummary() {
