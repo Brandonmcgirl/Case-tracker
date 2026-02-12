@@ -268,73 +268,60 @@ async function sendToServer(entry = {}, reset = false, line = "", action = "add"
 
 
 /* ===== LOAD LOG ===== */
-
 async function loadLog() {
-
   try {
-
     const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);
-
     const data = await res.json();
-
     populateLines(data);
-
     displayLog(data);
-
     updateLastRunInfo(data);
 
-
-
     // Detect active run for current line
-
     if (currentLine) {
-
       const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
-
+      
       if (activeStart) {
-
-        runStartTime = activeStart.timestamp
-
-            ? new Date(activeStart.timestamp)
-
-            : new Date(); // fallback if missing
-
-        material = activeStart.material;
-
+        // There's an active Start entry
+        const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
         
-
-        // Find the latest count for this line
-
-        const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
-
-        if (lineEntries.length > 0) {
-
-          const latestEntry = lineEntries[lineEntries.length - 1];
-
-          lastCount = latestEntry.count;
-
+        if (!lastRunEntry) {
+          // Active run exists and hasn't been ended
+          runStartTime = activeStart.timestamp
+              ? new Date(activeStart.timestamp)
+              : new Date(); // fallback if missing
+          material = activeStart.material;
+          
+          // Find the latest count for this line
+          const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
+          if (lineEntries.length > 0) {
+            const latestEntry = lineEntries[lineEntries.length - 1];
+            lastCount = latestEntry.count;
+          } else {
+            lastCount = activeStart.count;
+          }
+          
+          targetCount = activeStart.targetCount || null;
+          updateSummary();
         } else {
-
-          lastCount = activeStart.count;
-
+          // Run was started but then ended - clear state
+          runStartTime = null;
+          material = "";
+          lastCount = null;
+          targetCount = null;
+          updateSummary();
         }
-
-        
-
-        targetCount = activeStart.targetCount || null;
-
+      } else {
+        // No Start entry at all - clear state
+        runStartTime = null;
+        material = "";
+        lastCount = null;
+        targetCount = null;
         updateSummary();
-
       }
-
     }
-
   } catch {
-
     document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
-
   }
-
 }
 
 
