@@ -151,29 +151,56 @@ async function loadLog() {
 
     // Detect active run for current line
     if (currentLine) {
-      const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
-      const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
+      // Get all entries for this line
+      const lineEntries = data.filter(e => e.line === currentLine);
       
-      if (activeStart && !lastRunEntry) {
-        // Active run exists and hasn't been ended
-        runStartTime = activeStart.timestamp
-            ? new Date(activeStart.timestamp)
-            : new Date(); // fallback if missing
-        material = activeStart.material;
+      // Find all Start entries for this line
+      const startEntries = lineEntries.filter(e => e.time === "Start");
+      
+      // Find last_run entry for this line
+      const lastRunEntry = lineEntries.find(e => e.last_run);
+      
+      // If we have Start entries and either no last_run or fewer last_runs than Starts
+      if (startEntries.length > 0) {
+        const hasActiveRun = !lastRunEntry || (
+          startEntries.length > (lastRunEntry ? 1 : 0)
+        );
         
-        // Find the latest count for this line
-        const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
-        if (lineEntries.length > 0) {
-          const latestEntry = lineEntries[lineEntries.length - 1];
-          lastCount = latestEntry.count;
+        if (hasActiveRun) {
+          // Get the most recent Start entry
+          const latestStart = startEntries[startEntries.length - 1];
+          
+          runStartTime = latestStart.timestamp
+              ? new Date(latestStart.timestamp)
+              : new Date();
+          material = latestStart.material;
+          
+          // Find the latest count entry for this run
+          const entriesForCurrentRun = lineEntries.filter(e => {
+            if (e.time === "Init" || e.time === "Start" || e.last_run) return false;
+            // Simple approach: include entries that came after the Start
+            return true;
+          });
+          
+          if (entriesForCurrentRun.length > 0) {
+            const latestEntry = entriesForCurrentRun[entriesForCurrentRun.length - 1];
+            lastCount = latestEntry.count;
+          } else {
+            lastCount = latestStart.count;
+          }
+          
+          targetCount = latestStart.targetCount || null;
+          updateSummary();
         } else {
-          lastCount = activeStart.count;
+          // No active run
+          runStartTime = null;
+          material = "";
+          lastCount = null;
+          targetCount = null;
+          updateSummary();
         }
-        
-        targetCount = activeStart.targetCount || null;
-        updateSummary();
       } else {
-        // No active run or run has been ended
+        // No Start entries at all
         runStartTime = null;
         material = "";
         lastCount = null;
