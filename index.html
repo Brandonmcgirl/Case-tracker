@@ -59,13 +59,14 @@ small { color: #94a3b8; }
 <button class="reset" onclick="endRun()">End Of Run</button>
 
 <script>
+
 /* ===== STATE ===== */
 let lines = [];
 let currentLine = "";
 let lastCount = null;
 let material = "";
 let runStartTime = null;
-let lastRun = {}; // per line
+let lastRun = {};
 const SERVER_URL = "https://cases.hytalesanarchy.com";
 
 /* ===== DOM ===== */
@@ -84,28 +85,21 @@ function updateClock() {
 setInterval(updateClock, 60000);
 updateClock();
 
-/* ===== PASSWORD PROMPT ===== */
+/* ===== PASSWORD ===== */
 async function getPassword(promptMsg = "Enter password:") {
   const pw = prompt(promptMsg);
   if (!pw) throw new Error("Password required");
   return pw;
 }
 
-/* ===== SERVER COMMUNICATION ===== */
+/* ===== SERVER COMM ===== */
 async function sendToServer(entry = {}, reset = false, line = "", action = "add", requirePassword = true) {
-  if (!line) {
-    alert("No line selected!");
-    return { error: "No line selected" };
-  }
+  if (!line) return alert("No line selected!");
 
   let password = "";
   if (requirePassword) {
-    try {
-      password = await getPassword();
-    } catch (err) {
-      alert("Password is required for this action.");
-      return { error: "Password required" };
-    }
+    try { password = await getPassword(); }
+    catch { return alert("Password required"); }
   }
 
   try {
@@ -117,15 +111,15 @@ async function sendToServer(entry = {}, reset = false, line = "", action = "add"
 
     if (res.status === 403) {
       alert("Wrong password!");
-      return { error: "Forbidden" };
+      return { error: true };
     }
 
     const data = await res.json();
-    await loadLog(); // refresh log immediately after success
+    await loadLog();
     return data;
-  } catch (err) {
+  } catch {
     alert("Server unreachable");
-    return { error: "Server unreachable" };
+    return { error: true };
   }
 }
 
@@ -134,22 +128,31 @@ async function loadLog() {
   try {
     const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);
     const data = await res.json();
+
     populateLines(data);
+    detectActiveRun(data);
     displayLog(data);
     updateLastRunInfo(data);
 
-    // Detect active run for current line
-    if (currentLine) {
-      const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
-      if (activeStart) {
-        runStartTime = new Date();
-        lastCount = activeStart.count;
-        material = activeStart.material;
-        updateSummary();
-      }
-    }
   } catch {
     document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
+  }
+}
+
+/* ===== DETECT ACTIVE RUN ===== */
+function detectActiveRun(data) {
+  if (!currentLine) return;
+
+  const starts = data
+    .filter(e => e.line === currentLine && e.time === "Start")
+    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+
+  if (starts.length > 0) {
+    const latest = starts[0];
+    runStartTime = latest.timestamp ? new Date(latest.timestamp) : null;
+    lastCount = latest.count;
+    material = latest.material;
+    updateSummary();
   }
 }
 
@@ -157,41 +160,52 @@ async function loadLog() {
 function populateLines(data) {
   lines = [...new Set(data.map(e => e.line))].filter(Boolean);
   const old = lineSelect.value;
+
   lineSelect.innerHTML = '<option value="">-- Select Line --</option>';
   lines.forEach(l => {
     const o = document.createElement("option");
-    o.value = l; o.text = l; lineSelect.appendChild(o);
+    o.value = l;
+    o.text = l;
+    lineSelect.appendChild(o);
   });
-  if (lines.includes(old)) { lineSelect.value = old; currentLine = old; }
+
+  if (lines.includes(old)) {
+    lineSelect.value = old;
+    currentLine = old;
+  }
 }
 
 function lineChanged() {
   currentLine = lineSelect.value;
-  lastCount = null; material = ""; runStartTime = null;
+  lastCount = null;
+  material = "";
+  runStartTime = null;
   updateSummary();
   displayLog([]);
   updateLastRunInfo();
 }
 
-/* ===== SUMMARY UPDATE ===== */
+/* ===== SUMMARY ===== */
 function updateSummary() {
   const summary = document.getElementById("summary");
   if (currentLine && lastCount !== null) {
-    summary.innerHTML = `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
+    summary.innerHTML =
+      `<b>Material:</b> ${material}<br><b>Last Count:</b> ${lastCount}`;
   } else {
     summary.innerHTML = "<small>Waiting for run...</small>";
   }
 }
 
-/* ===== ADD / DELETE LINE ===== */
+/* ===== ADD LINE ===== */
 async function addLine() {
   const name = document.getElementById("newLine").value.trim();
-  if (!name) return alert("Enter a line name");
+  if (!name) return alert("Enter line name");
+
   currentLine = name;
   document.getElementById("newLine").value = "";
 
   const entry = {
-    date: new Date().toDateString(),
+    timestamp: new Date().toISOString(),
     time: "Init",
     material: "-",
     count: 0,
@@ -202,6 +216,7 @@ async function addLine() {
   await sendToServer(entry, false, currentLine, "add", true);
 }
 
+/* ===== DELETE LINE ===== */
 async function deleteLine() {
   if (!currentLine) return alert("Select a line first");
   if (!confirm(`Delete line "${currentLine}"?`)) return;
@@ -209,7 +224,9 @@ async function deleteLine() {
   await sendToServer({}, true, currentLine, "delete", true);
 
   currentLine = "";
-  lastCount = null; material = ""; runStartTime = null;
+  lastCount = null;
+  material = "";
+  runStartTime = null;
   updateSummary();
   document.getElementById("log").innerHTML = "";
   document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
@@ -218,13 +235,15 @@ async function deleteLine() {
 /* ===== START RUN ===== */
 async function startRun() {
   if (!currentLine) return alert("Select a line first");
+
   material = materialInput.value.trim();
   lastCount = parseInt(startCountInput.value);
   if (!material || isNaN(lastCount)) return alert("Invalid setup");
+
   runStartTime = new Date();
 
   const entry = {
-    date: new Date().toDateString(),
+    timestamp: runStartTime.toISOString(),
     time: "Start",
     material,
     count: lastCount,
@@ -238,14 +257,17 @@ async function startRun() {
 
 /* ===== ADD ENTRY ===== */
 async function addEntry() {
-  if (!currentLine || lastCount === null) return alert("Start a run first");
+  if (!currentLine || lastCount === null)
+    return alert("Start a run first");
+
   const time = timeInput.value.trim();
   const count = parseInt(countInput.value);
   if (!time || isNaN(count)) return alert("Invalid entry");
 
   const diff = count - lastCount;
+
   const entry = {
-    date: new Date().toDateString(),
+    timestamp: new Date().toISOString(),
     time,
     material,
     count,
@@ -270,23 +292,20 @@ async function endRun() {
 
   if (!data.error && data.last_run) {
     const lr = data.last_run;
+
     lastRun[currentLine] = {
       material: lr.material,
       count: lr.count,
-      start: new Date(lr.start),
-      end: new Date(lr.end)
+      start: lr.start ? new Date(lr.start) : null,
+      end: lr.end ? new Date(lr.end) : null
     };
-    const l = lastRun[currentLine];
-    document.getElementById("lastRun").innerHTML = `
-      <b>Material:</b> ${l.material}<br>
-      <b>Last Count:</b> ${l.count}<br>
-      <b>Start:</b> ${l.start.toLocaleString()}<br>
-      <b>End:</b> ${l.end.toLocaleString()}
-    `;
   }
 
-  lastCount = null; material = ""; runStartTime = null;
+  lastCount = null;
+  material = "";
+  runStartTime = null;
   updateSummary();
+  updateLastRunInfo();
 }
 
 /* ===== DISPLAY LOG ===== */
@@ -295,49 +314,58 @@ function displayLog(data = []) {
   logDiv.innerHTML = "";
   if (!currentLine) return;
 
-  data.filter(e => e.line === currentLine && !e.last_run).forEach(e => {
-    const d = document.createElement("div");
-    d.className = "log-entry";
-    d.innerHTML = `${e.time} | ${e.material} | ${e.count} <b>(+${e.diff || 0})</b>`;
-    logDiv.appendChild(d);
-  });
+  data
+    .filter(e => e.line === currentLine && !e.last_run)
+    .sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
+    .forEach(e => {
+      const d = document.createElement("div");
+      d.className = "log-entry";
+      d.innerHTML =
+        `${e.time} | ${e.material} | ${e.count} <b>(+${e.diff || 0})</b>`;
+      logDiv.appendChild(d);
+    });
 }
 
 /* ===== LAST RUN INFO ===== */
 function updateLastRunInfo(data = []) {
   if (!currentLine) {
-    document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
+    document.getElementById("lastRun").innerHTML =
+      "<small>No previous run</small>";
     return;
   }
 
-  const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
-  if (lastRunEntry) {
-    const lr = lastRunEntry.last_run;
+  const entry = data.find(e => e.line === currentLine && e.last_run);
+  if (entry) {
+    const lr = entry.last_run;
+
     lastRun[currentLine] = {
       material: lr.material,
       count: lr.count,
-      start: new Date(lr.start),
-      end: new Date(lr.end)
+      start: lr.start ? new Date(lr.start) : null,
+      end: lr.end ? new Date(lr.end) : null
     };
   }
 
-  if (lastRun[currentLine]) {
-    const lr = lastRun[currentLine];
-    document.getElementById("lastRun").innerHTML = `
-      <b>Material:</b> ${lr.material}<br>
-      <b>Last Count:</b> ${lr.count}<br>
-      <b>Start:</b> ${lr.start.toLocaleString()}<br>
-      <b>End:</b> ${lr.end.toLocaleString()}
-    `;
-  } else {
-    document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
+  const lr = lastRun[currentLine];
+  if (!lr) {
+    document.getElementById("lastRun").innerHTML =
+      "<small>No previous run</small>";
+    return;
   }
+
+  document.getElementById("lastRun").innerHTML = `
+    <b>Material:</b> ${lr.material}<br>
+    <b>Last Count:</b> ${lr.count}<br>
+    <b>Start:</b> ${lr.start ? lr.start.toLocaleString() : "N/A"}<br>
+    <b>End:</b> ${lr.end ? lr.end.toLocaleString() : "N/A"}
+  `;
 }
 
 /* ===== INIT ===== */
 loadLog();
-setInterval(loadLog, 5000); // refresh log every 5 seconds
-</script>
+setInterval(loadLog, 5000);
 
+</script>
 </body>
 </html>
+
