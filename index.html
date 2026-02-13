@@ -194,6 +194,11 @@ async function sendToServer(entry = {}, reset = false, line = "", action = "add"
 
 /* ===== DOWNTIME TRACKING ===== */
 async function toggleDowntime() {
+  if (!currentLine) {
+    alert("Select a line first!");
+    return;
+  }
+  
   try {
     let password = "";
     try {
@@ -203,7 +208,9 @@ async function toggleDowntime() {
       return;
     }
 
-    const endpoint = downtimeData.status === "running" ? "/downtime/stop" : "/downtime/start";
+    const endpoint = downtimeData.status === "running" ? 
+      `/downtime/${currentLine}/stop` : 
+      `/downtime/${currentLine}/start`;
     const res = await fetch(`${SERVER_URL}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -220,6 +227,33 @@ async function toggleDowntime() {
     alert("Server unreachable");
   }
 }
+
+async function loadDowntime() {
+  try {
+    const res = await fetch(`${SERVER_URL}/downtime.json?${Date.now()}`);
+    const allDowntimeData = await res.json();
+    
+    // Get downtime data for current line
+    const lineDowntime = allDowntimeData[currentLine] || {
+      status: "stopped",
+      total_uptime: 0,
+      total_downtime: 0,
+      start_time: null
+    };
+    
+    downtimeData = {
+      status: lineDowntime.status,
+      totalUptime: lineDowntime.total_uptime || 0,
+      totalDowntime: lineDowntime.total_downtime || 0,
+      startTime: lineDowntime.start_time
+    };
+    
+    updateDowntimeDisplay();
+  } catch (err) {
+    console.error("Downtime load error:", err);
+  }
+}
+
 
 async function loadDowntime() {
   try {
