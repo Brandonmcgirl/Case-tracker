@@ -179,16 +179,20 @@ async function submitSuggestion() {
     });
 
     if (res.ok) {
+      const data = await res.json();
       alert("Suggestion submitted successfully!");
       suggestionInput.value = "";
       suggestionUser.value = "";
     } else {
-      alert("Failed to submit suggestion");
+      const errorData = await res.json();
+      alert(`Failed to submit suggestion: ${errorData.error || "Unknown error"}`);
     }
   } catch (err) {
     alert("Server unreachable - suggestion not submitted");
+    console.error("Suggestion error:", err);
   }
 }
+
 
 /* ===== PROGRESS BAR ===== */
 function updateProgressBar() {
