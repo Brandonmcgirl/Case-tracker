@@ -277,14 +277,26 @@ const startTime = new Date(downtimeData.startTime);
 currentSession = (new Date() - startTime) / 1000; // seconds
 }
 
-// Total uptime calculation
+// Calculate current downtime session time if downtime is being tracked
+let currentDowntimeSession = 0;
+if (downtimeData.status === "stopped" && downtimeData.startTime && runStartTime) {
+const startTime = new Date(downtimeData.startTime);
+currentDowntimeSession = (new Date() - startTime) / 1000; // seconds
+}
+
+// Total calculations
 const totalUptimeSeconds = downtimeData.totalUptime + (downtimeData.status === "running" ? currentSession : 0);
+const totalDowntimeSeconds = downtimeData.totalDowntime + (downtimeData.status === "stopped" ? currentDowntimeSession : 0);
+
 const uptimeHours = Math.floor(totalUptimeSeconds / 3600);
 const uptimeMinutes = Math.floor((totalUptimeSeconds % 3600) / 60);
+const downtimeHours = Math.floor(totalDowntimeSeconds / 3600);
+const downtimeMinutes = Math.floor((totalDowntimeSeconds % 3600) / 60);
 
 // Display uptime/downtime
 displayDiv.innerHTML = `
 <strong>Uptime:</strong> ${uptimeHours}h ${uptimeMinutes}m<br>
+<strong>Downtime:</strong> ${downtimeHours}h ${downtimeMinutes}m<br>
 `;
 }
 
