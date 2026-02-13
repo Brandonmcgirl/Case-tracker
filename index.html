@@ -194,99 +194,100 @@ async function sendToServer(entry = {}, reset = false, line = "", action = "add"
 
 /* ===== DOWNTIME TRACKING ===== */
 async function toggleDowntime() {
-  if (!currentLine) {
-    alert("Select a line first!");
-    return;
-  }
-  
-  try {
-    let password = "";
-    try {
-      password = await getPassword();
-    } catch (err) {
-      alert("Password is required for this action.");
-      return;
-    }
+if (!currentLine) {
+alert("Select a line first!");
+return;
+}
 
-    const endpoint = downtimeData.status === "running" ? 
-      `/downtime/${currentLine}/stop` : 
-      `/downtime/${currentLine}/start`;
-    const res = await fetch(`${SERVER_URL}${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password })
-    });
+try {
+let password = "";
+try {
+password = await getPassword();
+} catch (err) {
+alert("Password is required for this action.");
+return;
+}
 
-    if (res.status === 403) {
-      alert("Wrong password!");
-      return;
-    }
+const endpoint = downtimeData.status === "running" ?
+`/downtime/${currentLine}/stop` :
+`/downtime/${currentLine}/start`;
+const res = await fetch(`${SERVER_URL}${endpoint}`, {
+method: "POST",
+headers: { "Content-Type": "application/json" },
+body: JSON.stringify({ password })
+});
 
-    await loadDowntime(); // Refresh downtime status
-  } catch (err) {
-    alert("Server unreachable");
-  }
+if (res.status === 403) {
+alert("Wrong password!");
+return;
+}
+
+await loadDowntime(); // Refresh downtime status
+} catch (err) {
+alert("Server unreachable");
+}
 }
 
 // ✅ KEEP ONLY THIS VERSION OF loadDowntime()
 async function loadDowntime() {
-  try {
-    const res = await fetch(`${SERVER_URL}/downtime.json?${Date.now()}`);
-    const allDowntimeData = await res.json();
-    
-    // Get downtime data for current line
-    const lineDowntime = allDowntimeData[currentLine] || {
-      status: "stopped",
-      total_uptime: 0,
-      total_downtime: 0,
-      start_time: null
-    };
-    
-    downtimeData = {
-      status: lineDowntime.status,
-      totalUptime: lineDowntime.total_uptime || 0,
-      totalDowntime: lineDowntime.total_downtime || 0,
-      startTime: lineDowntime.start_time
-    };
-    
-    updateDowntimeDisplay();
-  } catch (err) {
-    console.error("Downtime load error:", err);
-  }
+try {
+const res = await fetch(`${SERVER_URL}/downtime.json?${Date.now()}`);
+const allDowntimeData = await res.json();
+
+// Get downtime data for current line
+const lineDowntime = allDowntimeData[currentLine] || {
+status: "stopped",
+total_uptime: 0,
+total_downtime: 0,
+start_time: null
+};
+
+downtimeData = {
+status: lineDowntime.status,
+totalUptime: lineDowntime.total_uptime || 0,
+totalDowntime: lineDowntime.total_downtime || 0,
+startTime: lineDowntime.start_time
+};
+
+updateDowntimeDisplay();
+} catch (err) {
+console.error("Downtime load error:", err);
+}
 }
 
 function updateDowntimeDisplay() {
-  const statusDiv = document.getElementById("downtimeStatus");
-  const displayDiv = document.getElementById("downtimeDisplay");
-  
-  // Update button text and class
-  downtimeButton.textContent = downtimeData.status === "running" ? "Stop Uptime Tracking" : "Start Uptime Tracking";
-  downtimeButton.className = downtimeData.status === "running" ? "downtime stop" : "downtime";
-  
-  // Update status display
-  const statusLight = downtimeData.status === "running" ? 
-    '<span class="status-light running"></span>' : 
-    '<span class="status-light stopped"></span>';
-  const statusText = downtimeData.status === "running" ? "RUNNING" : "STOPPED";
-  statusDiv.innerHTML = `${statusLight} Status: ${statusText}`;
-  
-  // Calculate current session time if running
-  let currentSession = 0;
-  if (downtimeData.status === "running" && downtimeData.startTime) {
-    const startTime = new Date(downtimeData.startTime);
-    currentSession = (new Date() - startTime) / 1000; // seconds
-  }
-  
-  // Total uptime calculation
-  const totalUptimeSeconds = downtimeData.totalUptime + (downtimeData.status === "running" ? currentSession : 0);
-  const uptimeHours = Math.floor(totalUptimeSeconds / 3600);
-  const uptimeMinutes = Math.floor((totalUptimeSeconds % 3600) / 60);
-  
-  // Display uptime/downtime
-  displayDiv.innerHTML = `
-    <strong>Uptime:</strong> ${uptimeHours}h ${uptimeMinutes}m<br>
-  `;
+const statusDiv = document.getElementById("downtimeStatus");
+const displayDiv = document.getElementById("downtimeDisplay");
+
+// Update button text and class
+downtimeButton.textContent = downtimeData.status === "running" ? "Stop Uptime Tracking" : "Start Uptime Tracking";
+downtimeButton.className = downtimeData.status === "running" ? "downtime stop" : "downtime";
+
+// Update status display
+const statusLight = downtimeData.status === "running" ?
+'<span class="status-light running"></span>' :
+'<span class="status-light stopped"></span>';
+const statusText = downtimeData.status === "running" ? "RUNNING" : "STOPPED";
+statusDiv.innerHTML = `${statusLight} Status: ${statusText}`;
+
+// Calculate current session time if running
+let currentSession = 0;
+if (downtimeData.status === "running" && downtimeData.startTime) {
+const startTime = new Date(downtimeData.startTime);
+currentSession = (new Date() - startTime) / 1000; // seconds
 }
+
+// Total downtime calculation (this is what should be displayed)
+const totalDowntimeSeconds = downtimeData.totalDowntime + (downtimeData.status === "running" ? currentSession : 0);
+const downtimeHours = Math.floor(totalDowntimeSeconds / 3600);
+const downtimeMinutes = Math.floor((totalDowntimeSeconds % 3600) / 60);
+
+// Display uptime/downtime
+displayDiv.innerHTML = `
+<strong>Downtime:</strong> ${downtimeHours}h ${downtimeMinutes}m<br>
+`;
+}
+
 
 /* ===== HELPERS ===== */
 function formatTime(seconds) {
