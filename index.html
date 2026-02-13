@@ -260,7 +260,7 @@ function updateDowntimeDisplay() {
   const displayDiv = document.getElementById("downtimeDisplay");
   
   // Update button text and class
-  downtimeButton.textContent = downtimeData.status === "running" ? "Stop Downtime Tracking" : "Start Downtime Tracking";
+  downtimeButton.textContent = downtimeData.status === "running" ? "Stop Uptime Tracking" : "Start Uptime Tracking";
   downtimeButton.className = downtimeData.status === "running" ? "downtime stop" : "downtime";
   
   // Update status display
