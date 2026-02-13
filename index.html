@@ -82,7 +82,7 @@ small { color: #94a3b8; }
 </div>
 
 <div class="card">
-  <h3>Downtime Tracking BETA BROKEN</h3>
+  <h3>Downtime Tracking</h3>
   <div id="downtimeStatus"></div>
   <button id="downtimeButton" class="downtime" onclick="toggleDowntime()">Start Uptime Tracking</button>
   <div id="downtimeDisplay" class="downtime-display"></div>
@@ -286,6 +286,21 @@ function updateDowntimeDisplay() {
   displayDiv.innerHTML = `
     <strong>Uptime:</strong> ${uptimeHours}h ${uptimeMinutes}m<br>
   `;
+}
+
+/* ===== HELPERS ===== */
+function formatTime(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    } else {
+        return `${secs}s`;
+    }
 }
 
 /* ===== SUGGESTION SUBMISSION ===== */
@@ -598,16 +613,23 @@ function updateLastRunInfo(data = []) {
       count: lr.count,
       start: new Date(lr.start),
       end: new Date(lr.end),
-      targetCount: lr.targetCount
+      targetCount: lr.targetCount,
+      uptime: lr.uptime || 0,      // Add uptime
+      downtime: lr.downtime || 0   // Add downtime
     };
     
-    // Add downtime info to last run display
+    // Format uptime/downtime for display
+    const uptimeFormatted = formatTime(lr.uptime || 0);
+    const downtimeFormatted = formatTime(lr.downtime || 0);
+    
     document.getElementById("lastRun").innerHTML = `
       <b>Material:</b> ${lr.material}<br>
       <b>Last Count:</b> ${lr.count}<br>
       <b>Target Count:</b> ${lr.targetCount || 'N/A'}<br>
       <b>Start:</b> ${lr.start.toLocaleString()}<br>
-      <b>End:</b> ${lr.end.toLocaleString()}
+      <b>End:</b> ${lr.end.toLocaleString()}<br>
+      <b>Uptime:</b> ${uptimeFormatted}<br>
+      <b>Downtime:</b> ${downtimeFormatted}
     `;
   } else {
     document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
