@@ -53,9 +53,7 @@ border-radius: 5px;
 </style>
 </head>
 <body>
-
 <h1>Hourly Case Tracker By: Brandon McGirl</h1>
-
 <div class="card">
 <h3>Line Selection</h3>
 <select id="lineSelect" onchange="lineChanged()">
@@ -65,7 +63,6 @@ border-radius: 5px;
 <button onclick="addLine()">Add Line</button>
 <button onclick="deleteLine()" class="reset">Delete Line</button>
 </div>
-
 <div class="card">
 <h3>Run Setup</h3>
 <input id="material" placeholder="Material Code">
@@ -73,21 +70,18 @@ border-radius: 5px;
 <input id="targetCount" type="number" placeholder="Target Case Count (optional)">
 <button onclick="startRun()">Start Run</button>
 </div>
-
 <div class="card">
 <h3>Hourly Entry</h3>
 <input id="time" placeholder="Time (7am, 7:30)">
 <input id="count" type="number" placeholder="Current Case Count">
 <button onclick="addEntry()">Add Entry</button>
 </div>
-
 <div class="card">
 <h3>Downtime Tracking</h3>
 <div id="downtimeStatus"></div>
 <button id="downtimeButton" class="downtime" onclick="toggleDowntime()">Start Uptime Tracking</button>
 <div id="downtimeDisplay" class="downtime-display"></div>
 </div>
-
 <div class="card">
 <h3>Progress</h3>
 <div id="progressContainer"></div>
@@ -95,21 +89,17 @@ border-radius: 5px;
 <div id="summary"><small>Waiting for run...</small></div>
 <div id="log" class="log"></div>
 </div>
-
 <div class="card">
 <h3>Last Run Info</h3>
 <div id="lastRun"><small>No previous run</small></div>
 </div>
-
 <div class="card">
 <h3>Suggestions</h3>
 <input id="suggestionInput" placeholder="Enter your suggestion...">
 <input id="suggestionUser" placeholder="Your name (optional)">
 <button onclick="submitSuggestion()" class="suggestion">Submit Suggestion</button>
 </div>
-
 <button class="reset" onclick="endRun()">End Of Run</button>
-
 <script>
 /* ===== STATE ===== */
 let lines = [];
@@ -125,8 +115,7 @@ totalUptime: 0,
 totalDowntime: 0,
 startTime: null
 };
-const SERVER_URL = "https://cases.hytalesanarchy.com";
-
+const SERVER_URL = "https://cases.hytalesanarchy.com"; // Added https://
 /* ===== DOM ===== */
 const lineSelect = document.getElementById("lineSelect");
 const materialInput = document.getElementById("material");
@@ -137,7 +126,6 @@ const countInput = document.getElementById("count");
 const suggestionInput = document.getElementById("suggestionInput");
 const suggestionUser = document.getElementById("suggestionUser");
 const downtimeButton = document.getElementById("downtimeButton");
-
 /* ===== LIVE CLOCK ===== */
 function updateClock() {
 const now = new Date();
@@ -146,21 +134,18 @@ document.getElementById("liveTime").innerHTML =
 }
 setInterval(updateClock, 60000);
 updateClock();
-
 /* ===== PASSWORD PROMPT ===== */
 async function getPassword(promptMsg = "Enter password:") {
 const pw = prompt(promptMsg);
 if (!pw) throw new Error("Password required");
 return pw;
 }
-
 /* ===== SERVER COMMUNICATION ===== */
 async function sendToServer(entry = {}, reset = false, line = "", action = "add", requirePassword = true) {
 if (!line) {
 alert("No line selected!");
 return { error: "No line selected" };
 }
-
 let password = "";
 if (requirePassword) {
 try {
@@ -170,19 +155,16 @@ alert("Password is required for this action.");
 return { error: "Password required" };
 }
 }
-
 try {
-const res = await fetch(`${SERVER_URL}/add`, {
+const res = await fetch(`${SERVER_URL}/add`, {  // Fixed template literal
 method: "POST",
 headers: { "Content-Type": "application/json" },
 body: JSON.stringify({ entry, reset, line, action, password })
 });
-
 if (res.status === 403) {
 alert("Wrong password!");
 return { error: "Forbidden" };
 }
-
 const data = await res.json();
 await loadLog();
 return data;
@@ -191,14 +173,12 @@ alert("Server unreachable");
 return { error: "Server unreachable" };
 }
 }
-
 /* ===== DOWNTIME TRACKING ===== */
 async function toggleDowntime() {
 if (!currentLine) {
 alert("Select a line first!");
 return;
 }
-
 try {
 let password = "";
 try {
@@ -207,99 +187,71 @@ password = await getPassword();
 alert("Password is required for this action.");
 return;
 }
-
 const endpoint = downtimeData.status === "running" ?
 `/downtime/${currentLine}/stop` :
 `/downtime/${currentLine}/start`;
-const res = await fetch(`${SERVER_URL}${endpoint}`, {
+const res = await fetch(`${SERVER_URL}${endpoint}`, {  // Fixed template literal
 method: "POST",
 headers: { "Content-Type": "application/json" },
 body: JSON.stringify({ password })
 });
-
 if (res.status === 403) {
 alert("Wrong password!");
 return;
 }
-
 await loadDowntime();
 } catch (err) {
 alert("Server unreachable");
 }
 }
-
 async function loadDowntime() {
 try {
-const res = await fetch(`${SERVER_URL}/downtime.json?${Date.now()}`);
+const res = await fetch(`${SERVER_URL}/downtime.json?${Date.now()}`);  // Fixed template literal
 const allDowntimeData = await res.json();
-
 const lineDowntime = allDowntimeData[currentLine] || {
 status: "stopped",
 total_uptime: 0,
 total_downtime: 0,
 start_time: null
 };
-
 downtimeData = {
 status: lineDowntime.status,
 totalUptime: lineDowntime.total_uptime || 0,
 totalDowntime: lineDowntime.total_downtime || 0,
 startTime: lineDowntime.start_time
 };
-
 updateDowntimeDisplay();
 } catch (err) {
 console.error("Downtime load error:", err);
 }
 }
-
 function updateDowntimeDisplay() {
 const statusDiv = document.getElementById("downtimeStatus");
 const displayDiv = document.getElementById("downtimeDisplay");
-
 downtimeButton.textContent = downtimeData.status === "running" ? "Stop Uptime Tracking" : "Start Uptime Tracking";
 downtimeButton.className = downtimeData.status === "running" ? "downtime stop" : "downtime";
-
 const statusLight = downtimeData.status === "running" ?
 '<span class="status-light running"></span>' :
 '<span class="status-light stopped"></span>';
 const statusText = downtimeData.status === "running" ? "RUNNING" : "STOPPED";
 statusDiv.innerHTML = `${statusLight} Status: ${statusText}`;
 
-// Calculate current session time using local time (EST)
-let currentSession = 0;
-if (downtimeData.startTime) {
-const startTime = new Date(downtimeData.startTime);
-currentSession = (new Date() - startTime) / 1000; // seconds
-}
-
-// Total calculations
-let displayUptime = downtimeData.totalUptime;
-let displayDowntime = downtimeData.totalDowntime;
-
-if (downtimeData.status === "running") {
-displayUptime += currentSession;
-} else if (downtimeData.status === "stopped") {
-displayDowntime += currentSession;
-}
-
-const uptimeHours = Math.floor(displayUptime / 3600);
-const uptimeMinutes = Math.floor((displayUptime % 3600) / 60);
-const downtimeHours = Math.floor(displayDowntime / 3600);
-const downtimeMinutes = Math.floor((displayDowntime % 3600) / 60);
+// FIXED: Use the server-calculated values directly - NO LOCAL CALCULATIONS NEEDED
+const uptimeHours = Math.floor(downtimeData.totalUptime / 3600);
+const uptimeMinutes = Math.floor((downtimeData.totalUptime % 3600) / 60);
+const downtimeHours = Math.floor(downtimeData.totalDowntime / 3600);
+const downtimeMinutes = Math.floor((downtimeData.totalDowntime % 3600) / 60);
 
 displayDiv.innerHTML = `
 <strong>Uptime:</strong> ${uptimeHours}h ${uptimeMinutes}m<br>
 <strong>Downtime:</strong> ${downtimeHours}h ${downtimeMinutes}m<br>
 `;
 }
-
 /* ===== HELPERS ===== */
 function formatTime(seconds) {
 const hours = Math.floor(seconds / 3600);
 const minutes = Math.floor((seconds % 3600) / 60);
 const secs = Math.floor(seconds % 60);
-
 if (hours > 0) {
 return `${hours}h ${minutes}m`;
 } else if (minutes > 0) {
@@ -308,24 +260,20 @@ return `${minutes}m ${secs}s`;
 return `${secs}s`;
 }
 }
-
 /* ===== SUGGESTION SUBMISSION ===== */
 async function submitSuggestion() {
 const suggestion = suggestionInput.value.trim();
 const user = suggestionUser.value.trim() || "Anonymous";
-
 if (!suggestion) {
 alert("Please enter a suggestion");
 return;
 }
-
 try {
-const res = await fetch(`${SERVER_URL}/suggestions`, {
+const res = await fetch(`${SERVER_URL}/suggestions`, {  // Fixed template literal
 method: "POST",
 headers: { "Content-Type": "application/json" },
 body: JSON.stringify({ suggestion, user })
 });
-
 if (res.ok) {
 const data = await res.json();
 alert("Suggestion submitted successfully!");
@@ -333,28 +281,24 @@ suggestionInput.value = "";
 suggestionUser.value = "";
 } else {
 const errorData = await res.json();
-alert(`Failed to submit suggestion: ${errorData.error || "Unknown error"}`);
+alert(`Failed to submit suggestion: ${errorData.error || "Unknown error"}`);  // Fixed template literal
 }
 } catch (err) {
 alert("Server unreachable - suggestion not submitted");
 console.error("Suggestion error:", err);
 }
 }
-
 /* ===== PROGRESS BAR ===== */
 function updateProgressBar() {
 const progressContainer = document.getElementById("progressContainer");
 progressContainer.innerHTML = "";
-
 if (currentLine && targetCount && lastCount !== null && runStartTime) {
 const percentage = Math.min((lastCount / targetCount) * 100, 100);
 const isOverTarget = lastCount > targetCount;
-
 let colorClass = "green";
 if (percentage >= 100) {
 colorClass = isOverTarget ? "red" : "yellow";
 }
-
 const progressBar = document.createElement("div");
 progressBar.className = "progress-bar-container";
 progressBar.innerHTML = `
@@ -376,16 +320,14 @@ Waiting for run...
 progressContainer.appendChild(progressBar);
 }
 }
-
 /* ===== LOAD LOG ===== */
 async function loadLog() {
 try {
-const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);
+const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);  // Fixed template literal
 const data = await res.json();
 populateLines(data);
 displayLog(data);
 updateLastRunInfo(data);
-
 if (currentLine) {
 const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
 if (activeStart) {
@@ -393,7 +335,6 @@ runStartTime = activeStart.timestamp
 ? new Date(activeStart.timestamp)
 : new Date();
 material = activeStart.material;
-
 const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
 if (lineEntries.length > 0) {
 const latestEntry = lineEntries[lineEntries.length - 1];
@@ -401,7 +342,6 @@ lastCount = latestEntry.count;
 } else {
 lastCount = activeStart.count;
 }
-
 targetCount = activeStart.targetCount || null;
 updateSummary();
 updateProgressBar();
@@ -418,7 +358,6 @@ updateProgressBar();
 document.getElementById("log").innerHTML = "<small>Server not reachable.</small>";
 }
 }
-
 /* ===== LINES ===== */
 function populateLines(data) {
 lines = [...new Set(data.map(e => e.line))].filter(Boolean);
@@ -430,7 +369,6 @@ o.value = l; o.text = l; lineSelect.appendChild(o);
 });
 if (lines.includes(old)) { lineSelect.value = old; currentLine = old; }
 }
-
 function lineChanged() {
 currentLine = lineSelect.value;
 lastCount = null; targetCount = null; material = ""; runStartTime = null;
@@ -440,7 +378,6 @@ displayLog([]);
 updateLastRunInfo();
 loadDowntime();
 }
-
 /* ===== SUMMARY UPDATE ===== */
 function updateSummary() {
 const summary = document.getElementById("summary");
@@ -454,14 +391,12 @@ summary.innerHTML = summaryHTML;
 summary.innerHTML = "<small>Waiting for run...</small>";
 }
 }
-
 /* ===== ADD / DELETE LINE ===== */
 async function addLine() {
 const name = document.getElementById("newLine").value.trim();
 if (!name) return alert("Enter a line name");
 currentLine = name;
 document.getElementById("newLine").value = "";
-
 const entry = {
 date: new Date().toDateString(),
 time: "Init",
@@ -470,16 +405,12 @@ count: 0,
 diff: 0,
 line: currentLine
 };
-
 await sendToServer(entry, false, currentLine, "add", true);
 }
-
 async function deleteLine() {
 if (!currentLine) return alert("Select a line first");
-if (!confirm(`Delete line "${currentLine}"?`)) return;
-
+if (!confirm(`Delete line "${currentLine}"?`)) return;  // Fixed template literal
 await sendToServer({}, true, currentLine, "delete", true);
-
 currentLine = "";
 lastCount = null; targetCount = null; material = ""; runStartTime = null;
 updateSummary();
@@ -487,7 +418,6 @@ updateProgressBar();
 document.getElementById("log").innerHTML = "";
 document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
 }
-
 /* ===== START RUN ===== */
 async function startRun() {
 if (!currentLine) return alert("Select a line first");
@@ -495,7 +425,6 @@ material = materialInput.value.trim();
 lastCount = parseInt(startCountInput.value) || 0;
 targetCount = parseInt(targetCountInput.value) || null;
 if (!material) return alert("Invalid setup");
-
 const entry = {
 date: new Date().toDateString(),
 time: "Start",
@@ -505,7 +434,6 @@ diff: 0,
 line: currentLine,
 targetCount: targetCount
 };
-
 const data = await sendToServer(entry, false, currentLine, "add", true);
 if (!data.error) {
 runStartTime = new Date();
@@ -513,14 +441,12 @@ updateSummary();
 updateProgressBar();
 }
 }
-
 /* ===== ADD ENTRY ===== */
 async function addEntry() {
 if (!currentLine) return alert("Start a run first");
 const time = timeInput.value.trim();
 const count = parseInt(countInput.value);
 if (!time || isNaN(count)) return alert("Invalid entry");
-
 const diff = count - (lastCount || 0);
 const entry = {
 date: new Date().toDateString(),
@@ -530,7 +456,6 @@ count,
 diff,
 line: currentLine
 };
-
 const data = await sendToServer(entry, false, currentLine, "add", true);
 if (!data.error) {
 lastCount = count;
@@ -540,18 +465,14 @@ timeInput.value = "";
 countInput.value = "";
 }
 }
-
 // ===== END RUN =====
 async function endRun() {
 if (!runStartTime) return alert("No active run");
-
 const data = await sendToServer({}, false, currentLine, "endrun", true);
-
 if (!data.error && data.last_run) {
 const lr = data.last_run;
 const startDate = lr.start ? new Date(lr.start) : new Date();
 const endDate = lr.end ? new Date(lr.end) : new Date();
-
 lastRun[currentLine] = {
 material: lr.material,
 count: lr.count,
@@ -559,7 +480,6 @@ start: startDate,
 end: endDate,
 targetCount: lr.targetCount
 };
-
 const l = lastRun[currentLine];
 document.getElementById("lastRun").innerHTML = `
 <b>Material:</b> ${l.material}<br>
@@ -568,23 +488,19 @@ document.getElementById("lastRun").innerHTML = `
 <b>Start:</b> ${l.start.toLocaleString()}<br>
 <b>End:</b> ${l.end.toLocaleString()}
 `;
-
 lastCount = l.count;
 targetCount = l.targetCount;
-
 runStartTime = null;
 material = "";
 updateSummary();
 updateProgressBar();
 }
 }
-
 /* ===== DISPLAY LOG ===== */
 function displayLog(data = []) {
 const logDiv = document.getElementById("log");
 logDiv.innerHTML = "";
 if (!currentLine) return;
-
 data.filter(e => e.line === currentLine && !e.last_run).forEach(e => {
 const d = document.createElement("div");
 d.className = "log-entry";
@@ -592,14 +508,12 @@ d.innerHTML = `${e.time} | ${e.material} | ${e.count} <b>(+${e.diff || 0})</b>`;
 logDiv.appendChild(d);
 });
 }
-
 /* ===== LAST RUN INFO ===== */
 function updateLastRunInfo(data = []) {
 if (!currentLine) {
 document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
 return;
 }
-
 const lastRunEntry = data.find(e => e.line === currentLine && e.last_run);
 if (lastRunEntry) {
 const lr = lastRunEntry.last_run;
@@ -612,10 +526,8 @@ targetCount: lr.targetCount,
 uptime: lr.uptime || 0,
 downtime: lr.downtime || 0
 };
-
 const uptimeFormatted = formatTime(lr.uptime || 0);
 const downtimeFormatted = formatTime(lr.downtime || 0);
-
 document.getElementById("lastRun").innerHTML = `
 <b>Material:</b> ${lr.material}<br>
 <b>Last Count:</b> ${lr.count}<br>
@@ -629,14 +541,11 @@ document.getElementById("lastRun").innerHTML = `
 document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
 }
 }
-
 /* ===== INIT ===== */
 loadLog();
 setInterval(loadLog, 5000);
-
 loadDowntime();
 setInterval(loadDowntime, 30000);
 </script>
-
 </body>
 </html>
