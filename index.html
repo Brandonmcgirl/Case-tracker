@@ -82,7 +82,7 @@ border-radius: 5px;
 </div>
 
 <div class="card">
-<h3>Downtime Tracking (Work In progress) (bugged)</h3>
+<h3>Downtime Tracking</h3>
 <div id="downtimeStatus"></div>
 <button id="downtimeButton" class="downtime" onclick="toggleDowntime()">Start Uptime Tracking</button>
 <div id="downtimeDisplay" class="downtime-display"></div>
@@ -118,14 +118,14 @@ let lastCount = null;
 let targetCount = null;
 let material = "";
 let runStartTime = null;
-let lastRun = {}; // per line
+let lastRun = {};
 let downtimeData = {
 status: "stopped",
 totalUptime: 0,
 totalDowntime: 0,
 startTime: null
 };
-const SERVER_URL = "https://cases.hytalesanarchy.com";
+const SERVER_URL = "https://dem-ratios-easy-manufacturers.trycloudflare.com";
 
 /* ===== DOM ===== */
 const lineSelect = document.getElementById("lineSelect");
@@ -184,7 +184,7 @@ return { error: "Forbidden" };
 }
 
 const data = await res.json();
-await loadLog(); // refresh log immediately after success
+await loadLog();
 return data;
 } catch (err) {
 alert("Server unreachable");
@@ -222,19 +222,17 @@ alert("Wrong password!");
 return;
 }
 
-await loadDowntime(); // Refresh downtime status
+await loadDowntime();
 } catch (err) {
 alert("Server unreachable");
 }
 }
 
-// ✅ KEEP ONLY THIS VERSION OF loadDowntime()
 async function loadDowntime() {
 try {
 const res = await fetch(`${SERVER_URL}/downtime.json?${Date.now()}`);
 const allDowntimeData = await res.json();
 
-// Get downtime data for current line
 const lineDowntime = allDowntimeData[currentLine] || {
 status: "stopped",
 total_uptime: 0,
@@ -259,41 +257,37 @@ function updateDowntimeDisplay() {
 const statusDiv = document.getElementById("downtimeStatus");
 const displayDiv = document.getElementById("downtimeDisplay");
 
-// Update button text and class
 downtimeButton.textContent = downtimeData.status === "running" ? "Stop Uptime Tracking" : "Start Uptime Tracking";
 downtimeButton.className = downtimeData.status === "running" ? "downtime stop" : "downtime";
 
-// Update status display
 const statusLight = downtimeData.status === "running" ?
 '<span class="status-light running"></span>' :
 '<span class="status-light stopped"></span>';
 const statusText = downtimeData.status === "running" ? "RUNNING" : "STOPPED";
 statusDiv.innerHTML = `${statusLight} Status: ${statusText}`;
 
-// Calculate current session time if running
+// Calculate current session time using local time (EST)
 let currentSession = 0;
-if (downtimeData.status === "running" && downtimeData.startTime) {
+if (downtimeData.startTime) {
 const startTime = new Date(downtimeData.startTime);
 currentSession = (new Date() - startTime) / 1000; // seconds
 }
 
-// Calculate current downtime session time if downtime is being tracked
-let currentDowntimeSession = 0;
-if (downtimeData.status === "stopped" && downtimeData.startTime && runStartTime) {
-const startTime = new Date(downtimeData.startTime);
-currentDowntimeSession = (new Date() - startTime) / 1000; // seconds
+// Total calculations
+let displayUptime = downtimeData.totalUptime;
+let displayDowntime = downtimeData.totalDowntime;
+
+if (downtimeData.status === "running") {
+displayUptime += currentSession;
+} else if (downtimeData.status === "stopped") {
+displayDowntime += currentSession;
 }
 
-// Total calculations
-const totalUptimeSeconds = downtimeData.totalUptime + (downtimeData.status === "running" ? currentSession : 0);
-const totalDowntimeSeconds = downtimeData.totalDowntime + (downtimeData.status === "stopped" ? currentDowntimeSession : 0);
+const uptimeHours = Math.floor(displayUptime / 3600);
+const uptimeMinutes = Math.floor((displayUptime % 3600) / 60);
+const downtimeHours = Math.floor(displayDowntime / 3600);
+const downtimeMinutes = Math.floor((displayDowntime % 3600) / 60);
 
-const uptimeHours = Math.floor(totalUptimeSeconds / 3600);
-const uptimeMinutes = Math.floor((totalUptimeSeconds % 3600) / 60);
-const downtimeHours = Math.floor(totalDowntimeSeconds / 3600);
-const downtimeMinutes = Math.floor((totalDowntimeSeconds % 3600) / 60);
-
-// Display uptime/downtime
 displayDiv.innerHTML = `
 <strong>Uptime:</strong> ${uptimeHours}h ${uptimeMinutes}m<br>
 <strong>Downtime:</strong> ${downtimeHours}h ${downtimeMinutes}m<br>
@@ -371,7 +365,6 @@ ${Math.round(percentage)}%
 `;
 progressContainer.appendChild(progressBar);
 } else if (currentLine && !runStartTime) {
-// No active run
 const progressBar = document.createElement("div");
 progressBar.className = "progress-bar-container";
 progressBar.innerHTML = `
@@ -393,16 +386,14 @@ populateLines(data);
 displayLog(data);
 updateLastRunInfo(data);
 
-// Detect active run for current line
 if (currentLine) {
 const activeStart = data.find(e => e.line === currentLine && e.time === "Start");
 if (activeStart) {
 runStartTime = activeStart.timestamp
 ? new Date(activeStart.timestamp)
-: new Date(); // fallback if missing
+: new Date();
 material = activeStart.material;
 
-// Find the latest count for this line
 const lineEntries = data.filter(e => e.line === currentLine && e.time !== "Init" && e.time !== "Start");
 if (lineEntries.length > 0) {
 const latestEntry = lineEntries[lineEntries.length - 1];
@@ -415,7 +406,6 @@ targetCount = activeStart.targetCount || null;
 updateSummary();
 updateProgressBar();
 } else {
-// No active run
 runStartTime = null;
 material = "";
 lastCount = null;
@@ -448,8 +438,6 @@ updateSummary();
 updateProgressBar();
 displayLog([]);
 updateLastRunInfo();
-
-// Reload downtime when line changes
 loadDowntime();
 }
 
@@ -520,12 +508,10 @@ targetCount: targetCount
 
 const data = await sendToServer(entry, false, currentLine, "add", true);
 if (!data.error) {
-// Only set local state if server accepted it
 runStartTime = new Date();
 updateSummary();
 updateProgressBar();
 }
-// If there's an error (wrong password), don't update anything
 }
 
 /* ===== ADD ENTRY ===== */
@@ -562,9 +548,7 @@ if (!runStartTime) return alert("No active run");
 const data = await sendToServer({}, false, currentLine, "endrun", true);
 
 if (!data.error && data.last_run) {
-// Only update if server accepted it
 const lr = data.last_run;
-// parse start correctly
 const startDate = lr.start ? new Date(lr.start) : new Date();
 const endDate = lr.end ? new Date(lr.end) : new Date();
 
@@ -575,6 +559,7 @@ start: startDate,
 end: endDate,
 targetCount: lr.targetCount
 };
+
 const l = lastRun[currentLine];
 document.getElementById("lastRun").innerHTML = `
 <b>Material:</b> ${l.material}<br>
@@ -584,16 +569,14 @@ document.getElementById("lastRun").innerHTML = `
 <b>End:</b> ${l.end.toLocaleString()}
 `;
 
-lastCount = l.count; // update lastCount so summary shows correctly until new run
+lastCount = l.count;
 targetCount = l.targetCount;
 
-// Clear run state
 runStartTime = null;
 material = "";
 updateSummary();
 updateProgressBar();
 }
-// If there's an error (wrong password), don't update anything
 }
 
 /* ===== DISPLAY LOG ===== */
@@ -626,11 +609,10 @@ count: lr.count,
 start: new Date(lr.start),
 end: new Date(lr.end),
 targetCount: lr.targetCount,
-uptime: lr.uptime || 0, // Add uptime
-downtime: lr.downtime || 0 // Add downtime
+uptime: lr.uptime || 0,
+downtime: lr.downtime || 0
 };
 
-// Format uptime/downtime for display
 const uptimeFormatted = formatTime(lr.uptime || 0);
 const downtimeFormatted = formatTime(lr.downtime || 0);
 
@@ -650,11 +632,10 @@ document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
 
 /* ===== INIT ===== */
 loadLog();
-setInterval(loadLog, 5000); // refresh log every 5 seconds
+setInterval(loadLog, 5000);
 
-// Load downtime tracking
 loadDowntime();
-setInterval(loadDowntime, 30000); // refresh downtime every 30 seconds
+setInterval(loadDowntime, 30000);
 </script>
 
 </body>
