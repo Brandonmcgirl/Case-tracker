@@ -1,0 +1,21 @@
+{
+  "23": {
+    "status": "running",
+    "start_time": "2026-06-16T07:16:28.252631-04:00",
+    "total_uptime": 0,
+    "total_downtime": 0,
+    "session_start": "2026-06-16T07:16:32.132776-04:00"
+  },
+  "24": {
+    "status": "stopped",
+    "start_time": null,
+    "total_uptime": 0,
+    "total_downtime": 0
+  },
+  "999": {
+    "status": "stopped",
+    "start_time": "2026-04-08T07:28:58.058679-04:00",
+    "total_uptime": 0,
+    "total_downtime": 0
+  }
+}

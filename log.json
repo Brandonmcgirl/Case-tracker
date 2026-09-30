@@ -1,6 +1,32 @@
 [
   {
-    "date": "Mon Feb 09 2026",
+    "date": "Sun Feb 22 2026",
+    "time": "Init",
+    "material": "-",
+    "count": 0,
+    "diff": 0,
+    "line": "999"
+  },
+  {
+    "date": "Wed Apr 08 2026",
+    "time": "Start",
+    "material": "hgvfskajbja",
+    "count": 20500,
+    "diff": 0,
+    "line": "999",
+    "targetCount": 33000,
+    "timestamp": "2026-04-08T07:28:58.058605-04:00"
+  },
+  {
+    "date": "Wed Apr 08 2026",
+    "time": "12 pm",
+    "material": "hgvfskajbja",
+    "count": 22850,
+    "diff": 2350,
+    "line": "999"
+  },
+  {
+    "date": "Fri Feb 13 2026",
     "time": "Init",
     "material": "-",
     "count": 0,
@@ -8,59 +34,33 @@
     "line": "23"
   },
   {
-    "date": "Feb 9th 2026",
+    "line": "23",
+    "last_run": {
+      "material": "200010777 (Can  A+C Bulk)",
+      "count": 230,
+      "start": "Sun May 03 2026 11:14 PM",
+      "end": "Tue Jun 16 2026 07:16 AM",
+      "targetCount": 250,
+      "uptime": 3743898.761763,
+      "downtime": 207.2118879999034
+    }
+  },
+  {
+    "date": "Tue Jun 16 2026",
     "time": "Start",
-    "material": "56731",
-    "count": 0,
+    "material": "200010893 [ Can M+B Bulk ]",
+    "count": 361,
     "diff": 0,
+    "line": "23",
+    "targetCount": 455,
+    "timestamp": "2026-06-16T07:16:28.252507-04:00"
+  },
+  {
+    "date": "Tue Jun 16 2026",
+    "time": "7:15 Am",
+    "material": "200010893 [ Can M+B Bulk ]",
+    "count": 362,
+    "diff": 362,
     "line": "23"
-  },
-  {
-    "date": "Feb 9th 2026",
-    "time": "8am ",
-    "material": "56731",
-    "count": 525,
-    "diff": 525,
-    "line": "23"
-  },
-  {
-    "date": "Feb 9th 2026",
-    "time": "9am ",
-    "material": "56731",
-    "count": 1000,
-    "diff": 475,
-    "line": "23"
-  },
-  {
-    "date": "Mon Feb 09 2026",
-    "time": "Init",
-    "material": "-",
-    "count": 0,
-    "diff": 0,
-    "line": "35"
-  },
-  {
-    "date": "Feb 9th 2026 (6:46pm)",
-    "time": "Start",
-    "material": "12345",
-    "count": 0,
-    "diff": 0,
-    "line": "35"
-  },
-  {
-    "date": "Feb 9th 2026 (6:46pm)",
-    "time": "8pm",
-    "material": "12345",
-    "count": 500,
-    "diff": 500,
-    "line": "35"
-  },
-  {
-    "date": "Feb 9th 2026 (6:46pm)",
-    "time": "9pm",
-    "material": "12345",
-    "count": 988,
-    "diff": 488,
-    "line": "35"
   }
 ]
