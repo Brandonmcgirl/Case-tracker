@@ -12,3 +12,6 @@ venv/
 __pycache__/
 tsconfig.tsbuildinfo
 next-env.d.ts
+
+# local backups (may hold secrets)
+*.bak-sec-*

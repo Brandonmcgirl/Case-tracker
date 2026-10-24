@@ -25,8 +25,16 @@ def add_cors_headers(response):
 def index():
     return send_from_directory(".", "index.html")
 
+# 2026-10-24 hub security fix: this route used to serve the whole folder (.git, server.py, scripts).
+# Only plain web assets with no hidden or private path parts are served now.
+_PUBLIC_EXT = (".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".woff", ".woff2", ".webmanifest")
+_PRIVATE_DIRS = {"venv", "scripts", "__pycache__", ".git", ".github", ".snapshots"}
+
 @app.route("/<path:path>")
 def static_files(path):
+    parts = path.split("/")
+    if any(p.startswith(".") or p in _PRIVATE_DIRS for p in parts) or not path.lower().endswith(_PUBLIC_EXT):
+        return "Not found", 404
     return send_from_directory(".", path)
 
 # Safely load log.json
