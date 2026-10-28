@@ -44,6 +44,18 @@ margin-right: 10px;
 }
 .status-light.running { background-color: #10b981; }
 .status-light.stopped { background-color: #ef4444; }
+nav { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+nav a { color: #e5e7eb; background: #1e293b; padding: 8px 14px; border-radius: 6px; text-decoration: none; }
+nav a.on { background: #2563eb; }
+nav a.out { margin-left: auto; background: transparent; color: #94a3b8; }
+button.photo { background: #0891b2; font-size: 18px; padding: 14px; }
+.photo-check { margin-top: 10px; }
+.photo-check img { width: 100%; max-height: 260px; object-fit: contain; border-radius: 6px; background: #000; }
+.photo-check label { display: block; margin-top: 8px; color: #94a3b8; font-size: 14px; }
+.plan { padding: 10px; border-radius: 6px; background: #1e293b; margin: 10px 0; }
+.plan.warn { background: #78350f; }
+.btn-row { display: flex; gap: 8px; }
+button.ghost { background: #334155; }
 .downtime-display {
 margin: 10px 0;
 padding: 10px;
@@ -53,7 +65,15 @@ border-radius: 5px;
 </style>
 </head>
 <body>
+<nav><a class="on" href="/">Cases</a><a href="/schedule">Schedule</a><a class="out" href="/logout">Sign out</a></nav>
 <h1>Hourly Case Tracker By: Brandon McGirl</h1>
+<div class="card">
+<h3>Case Count From Photo</h3>
+<small>Take a photo of the Markem 5000 screen. Claude reads the job and batch count, you check it, then save.</small>
+<input id="photoInput" type="file" accept="image/*" capture="environment" style="display:none" onchange="readPhoto(this)">
+<button class="photo" onclick="document.getElementById('photoInput').click()">📷 Read Markem Photo</button>
+<div id="photoResult"></div>
+</div>
 <div class="card">
 <h3>Line Selection</h3>
 <select id="lineSelect" onchange="lineChanged()">
@@ -115,7 +135,7 @@ totalUptime: 0,
 totalDowntime: 0,
 startTime: null
 };
-const SERVER_URL = "https://cases.hytalesanarchy.com"; // Added https://
+const SERVER_URL = ""; // same site; the signed-in session cookie goes with every request
 /* ===== DOM ===== */
 const lineSelect = document.getElementById("lineSelect");
 const materialInput = document.getElementById("material");
@@ -141,28 +161,29 @@ if (!pw) throw new Error("Password required");
 return pw;
 }
 /* ===== SERVER COMMUNICATION ===== */
+// POST as the signed-in user; if the server wants a password (admin-only actions), ask once and retry.
+async function postWithLogin(url, body) {
+let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+if (res.status === 401) { location.href = "/login"; return null; }
+if (res.status === 403) {
+const err = await res.clone().json().catch(() => ({}));
+let password;
+try { password = await getPassword((err.error || "Password needed") + " - enter the admin password:"); } catch { return null; }
+res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, password }) });
+}
+return res;
+}
 async function sendToServer(entry = {}, reset = false, line = "", action = "add", requirePassword = true) {
 if (!line) {
 alert("No line selected!");
 return { error: "No line selected" };
 }
-let password = "";
-if (requirePassword) {
 try {
-password = await getPassword();
-} catch (err) {
-alert("Password is required for this action.");
-return { error: "Password required" };
-}
-}
-try {
-const res = await fetch(`${SERVER_URL}/add`, {  // Fixed template literal
-method: "POST",
-headers: { "Content-Type": "application/json" },
-body: JSON.stringify({ entry, reset, line, action, password })
-});
+const res = await postWithLogin(`${SERVER_URL}/add`, { entry, reset, line, action });
+if (!res) return { error: "Password required" };
 if (res.status === 403) {
-alert("Wrong password!");
+const err = await res.json().catch(() => ({}));
+alert(err.error || "Wrong password!");
 return { error: "Forbidden" };
 }
 const data = await res.json();
@@ -180,21 +201,11 @@ alert("Select a line first!");
 return;
 }
 try {
-let password = "";
-try {
-password = await getPassword();
-} catch (err) {
-alert("Password is required for this action.");
-return;
-}
 const endpoint = downtimeData.status === "running" ?
 `/downtime/${currentLine}/stop` :
 `/downtime/${currentLine}/start`;
-const res = await fetch(`${SERVER_URL}${endpoint}`, {  // Fixed template literal
-method: "POST",
-headers: { "Content-Type": "application/json" },
-body: JSON.stringify({ password })
-});
+const res = await postWithLogin(`${SERVER_URL}${endpoint}`, {});
+if (!res) return;
 if (res.status === 403) {
 alert("Wrong password!");
 return;
@@ -324,6 +335,7 @@ progressContainer.appendChild(progressBar);
 async function loadLog() {
 try {
 const res = await fetch(`${SERVER_URL}/log.json?${Date.now()}`);  // Fixed template literal
+if (res.status === 401) { location.href = "/login"; return; }
 const data = await res.json();
 populateLines(data);
 displayLog(data);
@@ -541,6 +553,108 @@ document.getElementById("lastRun").innerHTML = `
 document.getElementById("lastRun").innerHTML = "<small>No previous run</small>";
 }
 }
+/* ===== CASE COUNT FROM PHOTO ===== */
+let photoCheck = null;
+function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+async function readPhoto(input) {
+const file = input.files[0];
+input.value = "";
+if (!file) return;
+const box = document.getElementById("photoResult");
+box.innerHTML = "<p>Reading the photo... (about 5-10 seconds)</p>";
+const form = new FormData();
+form.append("photo", file);
+let res, data;
+try {
+res = await fetch(`${SERVER_URL}/api/photo/read`, { method: "POST", body: form });
+if (res.status === 401) { location.href = "/login"; return; }
+data = await res.json();
+} catch (err) {
+box.innerHTML = '<p class="plan warn">Server unreachable - photo not read.</p>';
+return;
+}
+if (!res.ok) { box.innerHTML = `<p class="plan warn">${esc(data.error || "Couldn't read the photo")}</p>`; return; }
+photoCheck = data;
+const r = data.reading || {};
+const unreadable = !r.readable || data.count < 0 || !data.line;
+const productName = data.product ? data.product.name : "";
+const now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+box.innerHTML = `
+<div class="photo-check">
+<img src="${SERVER_URL}/api/photo/${esc(data.photo_id)}.jpg" alt="Markem photo">
+${unreadable ? `<p class="plan warn">Claude couldn't read everything${r.problem ? ": " + esc(r.problem) : ""}. Fill in or fix the boxes below.</p>` : ""}
+<small>Screen says job <b>${esc(r.job || "?")}</b>, batch <b>${esc(r.batch)}</b>${r.state ? ", " + esc(r.state) : ""}</small>
+<label>Line</label><input id="pcLine" value="${esc(data.line)}" oninput="photoPlan()">
+<label>Product ${data.sku ? "(SKU " + esc(data.sku) + ")" : ""}</label>
+<input id="pcProduct" value="${esc(productName)}" placeholder="${data.sku ? "New SKU - type the product name" : "Product"}">
+${data.sku && !data.product ? '<small>This SKU isn\'t on the checklists yet. Type its name and it will be remembered.</small>' : ""}
+<label>Case count (batch)</label><input id="pcCount" type="number" value="${data.count >= 0 ? esc(data.count) : ""}" oninput="photoPlan()">
+<label>Time</label><input id="pcTime" type="datetime-local" value="${esc(data.screen_time || now.toISOString().slice(0, 16))}">
+<div id="pcTargetBox"><label>Target case count (optional)</label><input id="pcTarget" type="number"></div>
+<div id="pcPlan" class="plan"></div>
+<div class="btn-row"><button id="pcSave" onclick="savePhoto()">Save</button><button class="ghost" onclick="cancelPhoto()">Cancel</button></div>
+</div>`;
+photoPlan();
+}
+function photoPlan() {
+if (!photoCheck) return;
+const d = photoCheck;
+const line = document.getElementById("pcLine").value.trim();
+const count = parseInt(document.getElementById("pcCount").value);
+const planDiv = document.getElementById("pcPlan");
+const sameLine = line === d.line;
+let plan = sameLine ? d.plan : "start";
+const productName = document.getElementById("pcProduct").value.trim() || d.sku || "this product";
+let html = "", warn = false;
+if (sameLine && plan === "new_run") {
+html = `Line ${esc(line)} is running <b>${esc(d.active_material)}</b>, but this photo shows <b>${esc(productName)}</b>.<br>Saving will <b>end that run</b> and start a new one at ${isNaN(count) ? "?" : count} cases.`;
+warn = true;
+} else if (plan === "add") {
+const diff = isNaN(count) ? "?" : count - (d.last_count || 0);
+html = `Adds an hourly entry to line ${esc(line)}: <b>${isNaN(count) ? "?" : count}</b> cases (<b>${diff >= 0 ? "+" : ""}${diff}</b> since last).`;
+if (!isNaN(count) && d.last_count !== null && count < d.last_count) { html += "<br>The count went DOWN. Check the number, or it may be a new batch."; warn = true; }
+} else {
+html = `Starts a new run on line ${esc(line)}: <b>${esc(productName)}</b> at ${isNaN(count) ? "?" : count} cases.`;
+if (sameLine && !d.line_exists || !sameLine) html += "<br>If this line doesn't exist yet you'll be asked for the admin password.";
+}
+planDiv.innerHTML = html;
+planDiv.className = "plan" + (warn ? " warn" : "");
+document.getElementById("pcTargetBox").style.display = plan === "add" ? "none" : "block";
+photoCheck.currentPlan = plan;
+}
+async function savePhoto() {
+const d = photoCheck;
+if (!d) return;
+const body = {
+photo_id: d.photo_id,
+line: document.getElementById("pcLine").value.trim(),
+sku: d.sku,
+product_name: document.getElementById("pcProduct").value.trim(),
+count: document.getElementById("pcCount").value,
+time: document.getElementById("pcTime").value,
+target: document.getElementById("pcTarget").value,
+plan: d.currentPlan
+};
+if (!body.line || body.count === "") return alert("Line and case count are needed");
+document.getElementById("pcSave").disabled = true;
+try {
+const res = await postWithLogin(`${SERVER_URL}/api/photo/save`, body);
+if (!res) { document.getElementById("pcSave").disabled = false; return; }
+const out = await res.json();
+if (!res.ok) { alert(out.error || "Save failed"); document.getElementById("pcSave").disabled = false; return; }
+document.getElementById("photoResult").innerHTML = `<p class="plan">✅ ${esc(out.status)}</p>`;
+photoCheck = null;
+currentLine = body.line;
+await loadLog();
+lineSelect.value = body.line;
+lineChanged();
+await loadLog();
+} catch (err) {
+alert("Server unreachable - not saved");
+document.getElementById("pcSave").disabled = false;
+}
+}
+function cancelPhoto() { photoCheck = null; document.getElementById("photoResult").innerHTML = ""; }
 /* ===== INIT ===== */
 loadLog();
 setInterval(loadLog, 5000);

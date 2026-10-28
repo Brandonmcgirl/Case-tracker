@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hourly Case Tracker - Schedule</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial; background: #0f172a; color: #e5e7eb; padding: 20px; margin: 0 auto; max-width: 1100px; }
+nav { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+nav a { color: #e5e7eb; background: #1e293b; padding: 8px 14px; border-radius: 6px; text-decoration: none; }
+nav a.on { background: #2563eb; }
+nav a.out { margin-left: auto; background: transparent; color: #94a3b8; }
+.card { background: #020617; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+small, .muted { color: #94a3b8; }
+input, select { width: 100%; padding: 10px; margin: 6px 0; font-size: 16px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+.seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.seg button { flex: 1; padding: 10px 6px; font-size: 15px; border: none; border-radius: 6px; background: #1e293b; color: #e5e7eb; cursor: pointer; min-width: 0; }
+.seg button.on { background: #2563eb; }
+.seg button.today { box-shadow: inset 0 -3px 0 #10b981; }
+.area { margin-bottom: 12px; }
+.area h3 { margin: 0 0 6px; font-size: 16px; color: #93c5fd; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+th, td { border: 1px solid #1e293b; padding: 4px; vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+.name { word-break: keep-all; }
+th { background: #1e293b; font-weight: normal; color: #94a3b8; }
+td.job, th.job { color: #cbd5e1; width: 27%; }
+.name { display: block; padding: 1px 3px; border-radius: 3px; }
+.name.hl { background: #713f12; color: #fde68a; }
+.name.me { outline: 2px solid #10b981; background: #064e3b; color: #fff; }
+.note { color: #94a3b8; font-size: 11px; }
+.ns { color: #475569; }
+.mine li { margin: 4px 0; }
+.status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #334155; }
+.status.proposed { background: #78350f; color: #fde68a; }
+.empty { text-align: center; padding: 30px 10px; }
+</style>
+</head>
+<body>
+<nav><a href="/">Cases</a><a class="on" href="/schedule">Schedule</a><a class="out" href="/logout">Sign out</a></nav>
+<h1>Schedule</h1>
+
+<div class="card">
+<div class="seg" id="sheetSeg">
+<button data-sheet="8hr" onclick="pickSheet('8hr')">8-hour (5x8)</button>
+<button data-sheet="12hr" onclick="pickSheet('12hr')">12-hour</button>
+</div>
+<select id="weekSelect" onchange="pickWeek(this.value)"></select>
+<input id="nameInput" placeholder="Find a name (e.g. MCGIRL)" oninput="nameChanged()">
+</div>
+
+<div id="mine"></div>
+<div id="dayCard" class="card" style="display:none">
+<div class="seg" id="daySeg"></div>
+<div id="shiftSeg" class="seg"></div>
+</div>
+<div id="board"></div>
+
+<script>
+let index = [], sheet = "8hr", sched = null, day = null, shiftFilter = "all";
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function fmtDate(iso, opts) { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, opts); }
+function todayIso() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+function person(p) { return typeof p === "string" ? { name: p } : p; }
+function query() { return document.getElementById("nameInput").value.trim().toUpperCase(); }
+function isMe(name) { const q = query(); return q.length >= 3 && name.toUpperCase().includes(q); }
+
+async function api(url) {
+  const res = await fetch(url);
+  if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+  return res.json();
+}
+
+async function init() {
+  document.getElementById("nameInput").value = store.get("schedName") || "";
+  sheet = store.get("schedSheet") || "8hr";
+  index = await api("/api/schedules");
+  pickSheet(sheet);
+}
+
+function pickSheet(s) {
+  sheet = s; store.set("schedSheet", s);
+  document.querySelectorAll("#sheetSeg button").forEach(b => b.classList.toggle("on", b.dataset.sheet === s));
+  const weeks = index.filter(w => w.sheet === s).sort((a, b) => a.week_start.localeCompare(b.week_start));
+  const sel = document.getElementById("weekSelect");
+  if (!weeks.length) {
+    sel.innerHTML = "<option>No weeks loaded</option>";
+    sched = null; render();
+    return;
+  }
+  sel.innerHTML = weeks.map(w => {
+    const end = new Date(w.week_start + "T12:00:00"); end.setDate(end.getDate() + 6);
+    return `<option value="${esc(w.id)}">Week of ${fmtDate(w.week_start, { month: "short", day: "numeric" })} - ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}${w.status === "proposed" ? " (proposed)" : ""}</option>`;
+  }).join("");
+  // Default: the week containing today, else the newest posted week
+  const t = todayIso();
+  const cur = weeks.find(w => { const e = new Date(w.week_start + "T12:00:00"); e.setDate(e.getDate() + 7); return w.week_start <= t && t < e.toISOString().slice(0, 10); })
+           || weeks.filter(w => w.status !== "proposed").pop() || weeks[weeks.length - 1];
+  sel.value = cur.id;
+  pickWeek(cur.id);
+}
+
+async function pickWeek(id) {
+  sched = await api("/api/schedules/" + encodeURIComponent(id));
+  const dates = sched.days.map(d => d.date);
+  day = dates.includes(todayIso()) ? todayIso() : (dates.includes(day) ? day : dates[0]);
+  shiftFilter = "all";
+  render();
+}
+
+function nameChanged() { store.set("schedName", document.getElementById("nameInput").value.trim()); render(); }
+
+function render() {
+  const board = document.getElementById("board");
+  const dayCard = document.getElementById("dayCard");
+  if (!sched) {
+    dayCard.style.display = "none";
+    document.getElementById("mine").innerHTML = "";
+    board.innerHTML = `<div class="card empty"><p>No ${sheet === "8hr" ? "8-hour" : "12-hour"} schedule loaded yet.</p><small>Send this week's sheet photos to the case-tracker chat and they'll show up here.</small></div>`;
+    return;
+  }
+  dayCard.style.display = "block";
+  const t = todayIso();
+  document.getElementById("daySeg").innerHTML = sched.days.map(d =>
+    `<button class="${d.date === day ? "on" : ""} ${d.date === t ? "today" : ""}" onclick="day='${d.date}';render()">${esc(d.label.slice(0, 3))}<br><small>${fmtDate(d.date, { day: "numeric" })}</small></button>`).join("");
+  document.getElementById("shiftSeg").innerHTML = [{ key: "all", label: "All shifts" }, ...sched.shifts].map(s =>
+    `<button class="${s.key === shiftFilter ? "on" : ""}" onclick="shiftFilter='${esc(s.key)}';render()">${esc(s.label)}</button>`).join("");
+  renderMine();
+  const shifts = shiftFilter === "all" ? sched.shifts : sched.shifts.filter(s => s.key === shiftFilter);
+  const dayInfo = sched.days.find(d => d.date === day);
+  let html = `<div class="card"><b>${esc(dayInfo.label)}, ${fmtDate(day, { month: "long", day: "numeric" })}</b> <span class="status ${esc(sched.status)}">${sched.status === "proposed" ? "Proposed" : "Posted"}</span>`;
+  if (sched.notes) html += `<br><small>${esc(sched.notes)}</small>`;
+  html += "</div>";
+  for (const area of sched.areas) {
+    const rows = area.jobs.map(job => {
+      const slots = (job.slots || {})[day] || {};
+      const cells = shifts.map(s => {
+        const people = (slots[s.key] || []).map(person);
+        if (!people.length) return `<td><span class="ns">-</span></td>`;
+        return "<td>" + people.map(p => `<span class="name ${p.hl ? "hl" : ""} ${isMe(p.name) ? "me" : ""}">${esc(p.name)}${p.note ? ` <span class="note">${esc(p.note)}</span>` : ""}</span>`).join("") + "</td>";
+      }).join("");
+      return { html: `<tr><td class="job">${esc(job.name)}</td>${cells}</tr>`, empty: shifts.every(s => !(slots[s.key] || []).length) };
+    }).filter(r => !r.empty);
+    if (!rows.length) continue;
+    html += `<div class="card area"><h3>${esc(area.name)}</h3><table><tr><th class="job">Job</th>${shifts.map(s => `<th>${esc(s.label)}</th>`).join("")}</tr>${rows.map(r => r.html).join("")}</table></div>`;
+  }
+  board.innerHTML = html;
+}
+
+function renderMine() {
+  const box = document.getElementById("mine");
+  const q = query();
+  if (q.length < 3) { box.innerHTML = ""; return; }
+  const hits = [];
+  for (const d of sched.days)
+    for (const area of sched.areas)
+      for (const job of area.jobs)
+        for (const s of sched.shifts)
+          for (const p of (((job.slots || {})[d.date] || {})[s.key] || []).map(person))
+            if (isMe(p.name)) hits.push({ d, s, area, job, p });
+  box.innerHTML = `<div class="card"><b>${esc(q)} this week</b>${hits.length ? "<ul class='mine'>" + hits.map(h =>
+    `<li><b>${esc(h.d.label.slice(0, 3))} ${fmtDate(h.d.date, { day: "numeric" })}</b> - ${esc(h.s.label)}${h.s.hours ? " (" + esc(h.s.hours) + ")" : ""}: ${esc(h.job.name)} <small>(${esc(h.area.name)})</small>${h.p.note ? ` <small>${esc(h.p.note)}</small>` : ""}</li>`).join("") + "</ul>"
+    : "<p class='muted'>Not on this sheet this week.</p>"}</div>`;
+}
+
+init();
+</script>
+</body>
+</html>

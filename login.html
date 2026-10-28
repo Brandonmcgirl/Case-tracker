@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hourly Case Tracker - Sign In</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial; background: #0f172a; color: #e5e7eb; padding: 20px; display: flex; justify-content: center; }
+.card { background: #020617; padding: 24px; border-radius: 10px; width: 100%; max-width: 380px; margin-top: 10vh; }
+input, button { width: 100%; padding: 12px; margin: 8px 0; font-size: 16px; border-radius: 6px; }
+input { border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+button { background: #2563eb; color: white; border: none; cursor: pointer; }
+.err { color: #fca5a5; min-height: 1.2em; }
+small { color: #94a3b8; }
+</style>
+</head>
+<body>
+<form class="card" method="post" action="/login">
+<h2>Hourly Case Tracker</h2>
+<small>Sign in with the tracker password.</small>
+<input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
+<div class="err" id="err"></div>
+<button type="submit">Sign In</button>
+</form>
+<script>
+const e = new URLSearchParams(location.search).get("error");
+if (e === "wait") document.getElementById("err").textContent = "Too many wrong tries. Wait 15 minutes.";
+else if (e) document.getElementById("err").textContent = "Wrong password.";
+</script>
+</body>
+</html>

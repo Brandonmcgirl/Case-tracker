@@ -15,3 +15,8 @@ next-env.d.ts
 
 # local backups (may hold secrets)
 *.bak-sec-*
+# private: products, schedules, photos, run log, suggestions (public repo)
+data/
+log.json
+downtime.json
+suggestions.txt

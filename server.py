@@ -1,16 +1,100 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session, redirect
 import json
 import os
+import time
 import datetime
+import hmac
 import pytz
 
+# Secrets live in .env (never committed): ADMIN_PASSWORD, USER_PASSWORD, SECRET_KEY, ANTHROPIC_API_KEY
+def _load_env(path=".env"):
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for raw in f:
+            raw = raw.strip()
+            if raw and not raw.startswith("#") and "=" in raw:
+                k, v = raw.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+_load_env()
+
 app = Flask(__name__)
+app.secret_key = os.environ["SECRET_KEY"]
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=30),
+    MAX_CONTENT_LENGTH=25 * 1024 * 1024,
+)
 LOG_FILE = "log.json"
 SUGGESTIONS_FILE = "suggestions.txt"
 DOWNTIME_FILE = "downtime.json"
-ADMIN_PASSWORD = "tyvek"
-USER_PASSWORD = "pep"
+ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
+USER_PASSWORD = os.environ["USER_PASSWORD"]
 TIMEZONE = pytz.timezone("America/New_York")  # EST equivalent
+
+def password_role(password):
+    """'admin', 'user' or None for a typed password."""
+    if password and hmac.compare_digest(password, ADMIN_PASSWORD):
+        return "admin"
+    if password and hmac.compare_digest(password, USER_PASSWORD):
+        return "user"
+    return None
+
+def check_role(password):
+    """(is_admin, is_user) from a typed password, falling back to the signed-in session."""
+    role = password_role(password) if password else session.get("role")
+    return role == "admin", role == "user"
+
+# --- Login: every page and data route needs a signed-in session ---
+_OPEN_PATHS = {"/login", "/logout"}
+_failed_logins = {}  # ip -> [timestamps]
+
+def _client_ip():
+    return request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
+@app.before_request
+def require_login():
+    if request.path in _OPEN_PATHS or request.method == "OPTIONS":
+        return None
+    if session.get("role") in ("admin", "user"):
+        return None
+    if request.path in ("/", "/schedule") or request.path.endswith(".html"):
+        return redirect("/login")
+    return jsonify({"error": "Not signed in"}), 401
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "GET":
+        return send_from_directory(".", "login.html")
+    ip = _client_ip()
+    now = time.time()
+    recent = [t for t in _failed_logins.get(ip, []) if now - t < 900]
+    if len(recent) >= 10:
+        return redirect("/login?error=wait")
+    role = password_role(request.form.get("password", ""))
+    if not role:
+        _failed_logins[ip] = recent + [now]
+        return redirect("/login?error=1")
+    _failed_logins.pop(ip, None)
+    session.clear()
+    session.permanent = True
+    session["role"] = role
+    return redirect("/")
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+@app.route("/whoami")
+def whoami():
+    return jsonify({"role": session.get("role")})
+
+@app.route("/schedule")
+def schedule_page():
+    return send_from_directory(".", "schedule.html")
 
 # --- CORS ---
 @app.after_request
@@ -144,8 +228,7 @@ def get_downtime():
 def start_downtime_tracking(line):
     data = request.get_json(force=True)
     password = data.get("password", "")
-    is_admin = password == ADMIN_PASSWORD
-    is_user = password == USER_PASSWORD
+    is_admin, is_user = check_role(password)
     has_permission = is_admin or is_user
     if not has_permission:
         return jsonify({"error": "Wrong password"}), 403
@@ -180,8 +263,7 @@ def start_downtime_tracking(line):
 def stop_downtime_tracking(line):
     data = request.get_json(force=True)
     password = data.get("password", "")
-    is_admin = password == ADMIN_PASSWORD
-    is_user = password == USER_PASSWORD
+    is_admin, is_user = check_role(password)
     has_permission = is_admin or is_user
     if not has_permission:
         return jsonify({"error": "Wrong password"}), 403
@@ -235,14 +317,70 @@ def format_local_time(dt=None):
         dt = datetime.datetime.now(TIMEZONE)
     return dt.strftime("%a %b %d %Y %I:%M %p")
 
+def end_run(line, log_data):
+    """Close the active run on a line: keep its Init row, store last_run, reset downtime. Saves the log."""
+    first_init = None
+    last_entry = None
+    start_entry = None
+    new_log = []
+    last_run_info = {}
+    for e in log_data:
+        if e.get("line") == line:
+            if e.get("time") == "Init" and not first_init:
+                first_init = e
+            elif e.get("time") == "Start":
+                start_entry = e
+            elif e.get("time") != "Init":
+                last_entry = e
+        else:
+            new_log.append(e)
+    if start_entry and last_entry:
+        start_dt = datetime.datetime.fromisoformat(start_entry["timestamp"])
+        start_local = start_dt.astimezone(TIMEZONE)
+        downtime_stats = get_current_downtime_stats(line)
+        last_run_info = {
+            "material": last_entry.get("material", "-"),
+            "count": last_entry.get("count", 0),
+            "start": format_local_time(start_local),
+            "end": format_local_time(),
+            "targetCount": start_entry.get("targetCount", 0),
+            "uptime": downtime_stats["uptime"],
+            "downtime": downtime_stats["downtime"]
+        }
+    elif last_entry:
+        downtime_stats = get_current_downtime_stats(line)
+        last_run_info = {
+            "material": last_entry.get("material", "-"),
+            "count": last_entry.get("count", 0),
+            "start": last_entry.get("date", "") + " " + last_entry.get("time", ""),
+            "end": format_local_time(),
+            "targetCount": 0,
+            "uptime": downtime_stats["uptime"],
+            "downtime": downtime_stats["downtime"]
+        }
+    if first_init:
+        new_log.append(first_init)
+    last_run_entry = {"line": line, "last_run": last_run_info}
+    new_log = [e for e in new_log if "last_run" not in e] + [last_run_entry]
+    downtime_data = load_downtime()
+    if line in downtime_data:
+        downtime_data[line] = {
+            "status": "stopped",
+            "start_time": None,
+            "total_uptime": 0,
+            "total_downtime": 0
+        }
+        save_downtime(downtime_data)
+    save_log(new_log)
+    return last_run_info
+
 @app.route("/add", methods=["POST", "OPTIONS"])
 def add_entry():
     if request.method == "OPTIONS":
         return "", 200
     data = request.get_json(force=True)
     password = data.get("password", "")
-    is_admin = password == ADMIN_PASSWORD
-    is_user = password == USER_PASSWORD
+    is_admin, is_user = check_role(password)
     has_permission = is_admin or is_user
     if not has_permission:
         return jsonify({"error": "Wrong password"}), 403
@@ -266,59 +404,7 @@ def add_entry():
         save_log(log_data)
         return jsonify({"status": f"Line {line} reset"})
     if action == "endrun":
-        first_init = None
-        last_entry = None
-        start_entry = None
-        new_log = []
-        last_run_info = {}
-        for e in log_data:
-            if e.get("line") == line:
-                if e.get("time") == "Init" and not first_init:
-                    first_init = e
-                elif e.get("time") == "Start":
-                    start_entry = e
-                elif e.get("time") != "Init":
-                    last_entry = e
-            else:
-                new_log.append(e)
-        if start_entry and last_entry:
-            start_dt = datetime.datetime.fromisoformat(start_entry["timestamp"])
-            start_local = start_dt.astimezone(TIMEZONE)
-            downtime_stats = get_current_downtime_stats(line)
-            last_run_info = {
-                "material": last_entry.get("material", "-"),
-                "count": last_entry.get("count", 0),
-                "start": format_local_time(start_local),
-                "end": format_local_time(),
-                "targetCount": start_entry.get("targetCount", 0),
-                "uptime": downtime_stats["uptime"],
-                "downtime": downtime_stats["downtime"]
-            }
-        elif last_entry:
-            downtime_stats = get_current_downtime_stats(line)
-            last_run_info = {
-                "material": last_entry.get("material", "-"),
-                "count": last_entry.get("count", 0),
-                "start": last_entry.get("date", "") + " " + last_entry.get("time", ""),
-                "end": format_local_time(),
-                "targetCount": 0,
-                "uptime": downtime_stats["uptime"],
-                "downtime": downtime_stats["downtime"]
-            }
-        if first_init:
-            new_log.append(first_init)
-        last_run_entry = {"line": line, "last_run": last_run_info}
-        new_log = [e for e in new_log if "last_run" not in e] + [last_run_entry]
-        downtime_data = load_downtime()
-        if line in downtime_data:
-            downtime_data[line] = {
-                "status": "stopped",
-                "start_time": None,
-                "total_uptime": 0,
-                "total_downtime": 0
-            }
-            save_downtime(downtime_data)
-        save_log(new_log)
+        last_run_info = end_run(line, log_data)
         return jsonify({"status": f"Run ended for {line}", "last_run": last_run_info})
     if entry.get("time") == "Init":
         line_exists = any(e.get("line") == line for e in log_data)
@@ -344,6 +430,8 @@ def add_entry():
     log_data.append(entry)
     save_log(log_data)
     return jsonify({"status": "entry added"})
+
+import features  # noqa: E402  photo counts + schedule API (registers routes on app)
 
 if __name__ == "__main__":
     if not os.path.exists(SUGGESTIONS_FILE):
