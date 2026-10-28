@@ -182,10 +182,13 @@ def photo_read():
     if active:
         rows = [e for e in log_data if e.get("line") == line and e.get("time") not in ("Init", "Start") and "last_run" not in e]
         last = rows[-1]["count"] if rows else active.get("count", 0)
-    # A run started by hand has no SKU, so treat it as the same product.
+    # A run typed in by hand has no sku field; use a SKU number in its material text if there is one.
+    active_sku = ""
+    if active:
+        active_sku = active.get("sku") or (re.search(r"\d{9}", active.get("material", "")) or [""])[0]
     if not active:
         plan = "start"
-    elif not sku or not active.get("sku") or active.get("sku") == sku:
+    elif not sku or not active_sku or active_sku == sku:
         plan = "add"
     else:
         plan = "new_run"
