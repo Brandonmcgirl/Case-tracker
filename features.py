@@ -27,7 +27,9 @@ PHOTO_DIR = os.path.join(DATA_DIR, "photos")
 SCHEDULE_DIR = os.path.join(DATA_DIR, "schedules")
 PHOTO_KEEP_DAYS = 7
 PHOTO_MAX_SIDE = 1280
-MODEL = "claude-opus-5-5"
+# Which Claude reads the photos: claude-opus-5-5 (default) or claude-haiku-4-5 (about 1/5 the cost).
+# Set CASE_TRACKER_MODEL in .env to switch.
+MODEL = os.environ.get("CASE_TRACKER_MODEL", "claude-opus-5-5")
 
 READ_PROMPT = """This photo should show the screen of a Markem 5000 Series case coder on a food packing line.
 Read these values exactly as printed on the screen:
@@ -100,23 +102,32 @@ def _shrink(raw):
     return out.getvalue()
 
 
-def read_markem(jpeg):
-    client = anthropic.Anthropic()  # ANTHROPIC_API_KEY from .env
-    response = client.beta.messages.create(
-        model=MODEL,
-        max_tokens=4000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": READ_SCHEMA}},
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                             "data": base64.standard_b64encode(jpeg).decode()}},
-                {"type": "text", "text": READ_PROMPT},
-            ],
-        }],
-    )
+def read_markem(jpeg, model=None):
+    model = model or MODEL
+    client = anthropic.Anthropic()  # ANTHROPIC_API_KEY from the hub's secrets file (systemd EnvironmentFile)
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                         "data": base64.standard_b64encode(jpeg).decode()}},
+            {"type": "text", "text": READ_PROMPT},
+        ],
+    }]
+    fmt = {"type": "json_schema", "schema": READ_SCHEMA}
+    if model.startswith("claude-haiku"):
+        # Haiku 4.5 takes no effort setting and no server-side fallbacks
+        response = client.messages.create(model=model, max_tokens=1000, output_config={"format": fmt},
+                                          messages=messages)
+    else:
+        response = client.beta.messages.create(
+            model=model,
+            max_tokens=4000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            output_config={"effort": "low", "format": fmt},
+            messages=messages,
+        )
+    print(f"photo read: {model} in={response.usage.input_tokens} out={response.usage.output_tokens}")
     if response.stop_reason == "refusal":
         raise ValueError("Claude declined to read this photo")
     text = "".join(b.text for b in response.content if b.type == "text")
