@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hourly Case Tracker - Sign Up</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial; background: #0f172a; color: #e5e7eb; padding: 20px; display: flex; justify-content: center; }
+.card { background: #020617; padding: 24px; border-radius: 10px; width: 100%; max-width: 420px; margin-top: 4vh; }
+input, button { width: 100%; padding: 12px; margin: 8px 0; font-size: 16px; border-radius: 6px; }
+input { border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+input.code { font-size: 28px; letter-spacing: 8px; text-align: center; }
+button { background: #2563eb; color: white; border: none; cursor: pointer; }
+button:disabled { opacity: .6; }
+.err { color: #fca5a5; min-height: 1.2em; }
+small, .muted { color: #94a3b8; }
+a { color: #93c5fd; }
+.qr { background: #fff; padding: 10px; border-radius: 8px; text-align: center; }
+.qr svg { width: 220px; height: 220px; }
+.secret { font-family: monospace; font-size: 15px; word-break: break-all; background: #1e293b; padding: 8px; border-radius: 6px; user-select: all; }
+ol { padding-left: 20px; } li { margin: 6px 0; }
+.ok { background: #064e3b; padding: 12px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div class="card">
+<h2>Sign Up</h2>
+<form id="step1" onsubmit="return signUp(event)">
+<small>Only people whose GPID is on the list can sign up. You'll also need an authenticator app (Authy, Google Authenticator or Microsoft Authenticator, free on iPhone and Android).</small>
+<input id="gpid" inputmode="numeric" placeholder="Your GPID" required autofocus>
+<input id="email" type="email" placeholder="Email" autocomplete="username" required>
+<input id="password" type="password" placeholder="Password (10+ characters)" autocomplete="new-password" minlength="10" required>
+<input id="password2" type="password" placeholder="Password again" autocomplete="new-password" required>
+<button id="b1" type="submit">Next</button>
+</form>
+<form id="step2" style="display:none" onsubmit="return enroll(event)">
+<p>Hi <b id="who"></b>. Link your authenticator app:</p>
+<ol>
+<li>Open the app, tap <b>+</b> / Add account.</li>
+<li>Scan this code. On this same phone, use <b>Enter a setup key</b> and paste the key below instead.</li>
+<li>Type the 6-digit code it shows for <b>Case Tracker</b>.</li>
+</ol>
+<div class="qr" id="qr"></div>
+<p><small>Setup key:</small></p>
+<div class="secret" id="secret"></div>
+<input id="code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" required>
+<button id="b2" type="submit">Finish</button>
+</form>
+<div id="done" style="display:none"></div>
+<div class="err" id="err"></div>
+<p class="muted"><a href="/login">Back to sign in</a></p>
+</div>
+<script>
+const err = document.getElementById("err");
+const $ = id => document.getElementById(id);
+async function post(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return { ok: res.ok, data: await res.json().catch(() => ({})) };
+}
+async function signUp(e) {
+  e.preventDefault(); err.textContent = "";
+  if ($("password").value !== $("password2").value) { err.textContent = "The two passwords don't match."; return false; }
+  $("b1").disabled = true;
+  const r = await post("/api/auth/signup", { gpid: $("gpid").value, email: $("email").value, password: $("password").value });
+  $("b1").disabled = false;
+  if (!r.ok) { err.textContent = r.data.error || "Sign-up failed."; return false; }
+  $("who").textContent = r.data.name;
+  $("qr").innerHTML = r.data.qr_svg;          // SVG drawn by our own server
+  $("secret").textContent = r.data.secret;
+  $("step1").style.display = "none"; $("step2").style.display = "block";
+  return false;
+}
+async function enroll(e) {
+  e.preventDefault(); err.textContent = ""; $("b2").disabled = true;
+  const r = await post("/api/auth/enroll", { code: $("code").value });
+  $("b2").disabled = false;
+  if (!r.ok) { err.textContent = r.data.error || "That code didn't match."; return false; }
+  $("step2").style.display = "none";
+  $("done").style.display = "block";
+  $("done").innerHTML = r.data.status === "active"
+    ? '<p class="ok">All set. <a href="/login">Sign in now</a>.</p>'
+    : '<p class="ok">Done! Your account is waiting for approval. You can sign in once Brandon or the scheduler approves it.</p>';
+  return false;
+}
+</script>
+</body>
+</html>

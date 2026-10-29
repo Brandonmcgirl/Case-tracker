@@ -35,10 +35,16 @@ td.job, th.job { color: #cbd5e1; width: 27%; }
 .status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #334155; }
 .status.proposed { background: #78350f; color: #fde68a; }
 .empty { text-align: center; padding: 30px 10px; }
+.name.chk { outline: 2px solid #ef4444; background: #450a0a; color: #fecaca; }
+td.edit { cursor: pointer; }
+button.act { padding: 10px 14px; font-size: 15px; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; margin: 4px 4px 0 0; }
+button.act.green { background: #059669; } button.act.ghost { background: #334155; } button.act.red { background: #dc2626; }
+.draftbar { background: #78350f; color: #fde68a; padding: 12px; border-radius: 10px; margin-bottom: 15px; }
+.drow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid #1e293b; flex-wrap: wrap; }
 </style>
 </head>
 <body>
-<nav><a href="/">Cases</a><a class="on" href="/schedule">Schedule</a><a class="out" href="/logout">Sign out</a></nav>
+<nav><a href="/">Cases</a><a class="on" href="/schedule">Schedule</a><a id="adminLink" href="/admin" style="display:none">People</a><a class="out" href="/logout">Sign out</a></nav>
 <h1>Schedule</h1>
 
 <div class="card">
@@ -50,6 +56,15 @@ td.job, th.job { color: #cbd5e1; width: 27%; }
 <input id="nameInput" placeholder="Find a name (e.g. MCGIRL)" oninput="nameChanged()">
 </div>
 
+<div class="card" id="uploadCard" style="display:none">
+<b>Upload this week's schedule</b><br>
+<small>Photo, PDF, Word or Excel. It's read on our own server (no AI, nothing sent out) and becomes a draft you check before anyone sees it. PDF or Excel from the scheduler is exact; photos get most names right and flag the rest in red.</small>
+<input id="schedFile" type="file" accept="image/*,.pdf,.docx,.xlsx,.xlsm" style="display:none" onchange="uploadSchedule(this)">
+<div><button class="act" onclick="document.getElementById('schedFile').click()">Upload photo or file</button></div>
+<div id="jobMsg"></div>
+<div id="drafts"></div>
+</div>
+<div id="draftBar"></div>
 <div id="mine"></div>
 <div id="dayCard" class="card" style="display:none">
 <div class="seg" id="daySeg"></div>
@@ -58,7 +73,7 @@ td.job, th.job { color: #cbd5e1; width: 27%; }
 <div id="board"></div>
 
 <script>
-let index = [], sheet = "8hr", sched = null, day = null, shiftFilter = "all";
+let index = [], sheet = "8hr", sched = null, day = null, shiftFilter = "all", draftId = null, staff = false;
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -75,13 +90,22 @@ async function api(url) {
 }
 
 async function init() {
-  document.getElementById("nameInput").value = store.get("schedName") || "";
+  const me = await api("/api/me");
+  if (me.role === "admin" || me.role === "scheduler") {
+    staff = true;
+    document.getElementById("adminLink").style.display = "";
+    document.getElementById("uploadCard").style.display = "";
+    loadDrafts();
+  }
+  const saved = store.get("schedName");
+  document.getElementById("nameInput").value = saved !== null ? saved : me.schedule_name;
   sheet = store.get("schedSheet") || "8hr";
   index = await api("/api/schedules");
   pickSheet(sheet);
 }
 
 function pickSheet(s) {
+  draftId = null;
   sheet = s; store.set("schedSheet", s);
   document.querySelectorAll("#sheetSeg button").forEach(b => b.classList.toggle("on", b.dataset.sheet === s));
   const weeks = index.filter(w => w.sheet === s).sort((a, b) => a.week_start.localeCompare(b.week_start));
@@ -131,6 +155,7 @@ function render() {
   renderMine();
   const shifts = shiftFilter === "all" ? sched.shifts : sched.shifts.filter(s => s.key === shiftFilter);
   const dayInfo = sched.days.find(d => d.date === day);
+  renderDraftBar();
   let html = `<div class="card"><b>${esc(dayInfo.label)}, ${fmtDate(day, { month: "long", day: "numeric" })}</b> <span class="status ${esc(sched.status)}">${sched.status === "proposed" ? "Proposed" : "Posted"}</span>`;
   if (sched.notes) html += `<br><small>${esc(sched.notes)}</small>`;
   html += "</div>";
@@ -139,15 +164,98 @@ function render() {
       const slots = (job.slots || {})[day] || {};
       const cells = shifts.map(s => {
         const people = (slots[s.key] || []).map(person);
-        if (!people.length) return `<td><span class="ns">-</span></td>`;
-        return "<td>" + people.map(p => `<span class="name ${p.hl ? "hl" : ""} ${isMe(p.name) ? "me" : ""}">${esc(p.name)}${p.note ? ` <span class="note">${esc(p.note)}</span>` : ""}</span>`).join("") + "</td>";
+        if (!people.length) return `<td${editAttr(job.name, s.key)}><span class="ns">-</span></td>`;
+        return `<td${editAttr(job.name, s.key)}>` + people.map(p => `<span class="name ${p.hl ? "hl" : ""} ${p.check ? "chk" : ""} ${isMe(p.name) ? "me" : ""}">${esc(p.name)}${p.note ? ` <span class="note">${esc(p.note)}</span>` : ""}</span>`).join("") + "</td>";
       }).join("");
       return { html: `<tr><td class="job">${esc(job.name)}</td>${cells}</tr>`, empty: shifts.every(s => !(slots[s.key] || []).length) };
-    }).filter(r => !r.empty);
+    }).filter(r => draftId || !r.empty);
     if (!rows.length) continue;
     html += `<div class="card area"><h3>${esc(area.name)}</h3><table><tr><th class="job">Job</th>${shifts.map(s => `<th>${esc(s.label)}</th>`).join("")}</tr>${rows.map(r => r.html).join("")}</table></div>`;
   }
   board.innerHTML = html;
+}
+
+function editAttr(job, key) {
+  return draftId ? ` class="edit" data-job="${esc(job)}" data-shift="${esc(key)}" onclick="editCell(this)"` : "";
+}
+
+/* ---- upload + drafts (scheduler/admin) ---- */
+async function uploadSchedule(input) {
+  const f = input.files[0]; input.value = "";
+  if (!f) return;
+  const msg = document.getElementById("jobMsg");
+  msg.innerHTML = "<p>Uploading...</p>";
+  const form = new FormData(); form.append("file", f);
+  const res = await fetch("/api/schedules/upload", { method: "POST", body: form });
+  const job = await res.json().catch(() => ({}));
+  if (!res.ok) { msg.innerHTML = `<p class="muted">${esc(job.error || "Upload failed")}</p>`; return; }
+  const poll = async () => {
+    const j = await api("/api/schedules/jobs/" + job.id);
+    msg.innerHTML = `<p>${esc(j.message)}${j.status === "running" ? " <small>(photos take 2-4 minutes)</small>" : ""}</p>`;
+    if (j.status === "running") setTimeout(poll, 4000); else loadDrafts();
+  };
+  poll();
+}
+async function loadDrafts() {
+  const list = await api("/api/schedules/drafts");
+  document.getElementById("drafts").innerHTML = list.length ? "<p><b>Drafts waiting</b></p>" + list.map(d => `
+    <div class="drow"><div>Week of ${esc(fmtDate(d.week_start, { month: "short", day: "numeric" }))} · ${d.sheet === "8hr" ? "8-hour" : "12-hour"} · ${d.status === "proposed" ? "proposed" : "posted"}
+    <br><small>${esc(d.source || "")} · ${d.to_check ? `<b style="color:#fca5a5">${d.to_check} name(s) to check</b>` : "nothing flagged"}</small></div>
+    <div><button class="act" onclick="openDraft('${esc(d.id)}')">Check</button><button class="act ghost" onclick="deleteDraft('${esc(d.id)}')">Delete</button></div></div>`).join("") : "";
+}
+async function openDraft(id) {
+  draftId = id;
+  sched = await api("/api/schedules/drafts/" + id);
+  sheet = sched.sheet;
+  document.querySelectorAll("#sheetSeg button").forEach(b => b.classList.toggle("on", b.dataset.sheet === sheet));
+  day = sched.days[0].date; shiftFilter = "all";
+  render();
+  window.scrollTo(0, document.getElementById("draftBar").offsetTop - 10);
+}
+function renderDraftBar() {
+  const bar = document.getElementById("draftBar");
+  if (!draftId) { bar.innerHTML = ""; return; }
+  const flagged = [];
+  for (const a of sched.areas) for (const j of a.jobs) for (const [d, sl] of Object.entries(j.slots || {})) for (const [k, ppl] of Object.entries(sl))
+    for (const p of ppl) if (p.check) flagged.push(d);
+  const byDay = sched.days.map(d => `${d.label.slice(0, 3)} ${flagged.filter(x => x === d.date).length}`).join(" · ");
+  bar.innerHTML = `<div class="draftbar"><b>Checking a draft</b> (not visible to anyone yet). Red names weren't recognised. From a photo, also check names are on the right row. Tap any cell to fix it.
+    <br><small>To check per day: ${byDay}</small>${labelNotes()}
+    <br><button class="act green" onclick="publishDraft()">Publish</button><button class="act ghost" onclick="closeDraft()">Close</button></div>`;
+}
+function labelNotes() {
+  const notes = (sched.review || []).filter(r => r.startsWith("Label")).map(r => (r.match(/'(.+)'/) || [, r])[1]);
+  if (!notes.length) return "";
+  return `<br><small>Text in the job column it didn't recognise (new job, or just print like footers): ${notes.slice(0, 4).map(esc).join(" · ")}${notes.length > 4 ? ` and ${notes.length - 4} more` : ""}</small>`;
+}
+async function editCell(td) {
+  const job = td.dataset.job, key = td.dataset.shift;
+  const slot = (sched.areas.flatMap(a => a.jobs).find(j => j.name === job).slots || {})[day] || {};
+  const now = (slot[key] || []).map(p => typeof p === "string" ? p : p.name).join(", ");
+  const label = sched.shifts.find(s => s.key === key).label;
+  const val = prompt(`${job} - ${label}, ${day}\nNames separated by commas (LAST FIRST). Leave empty for nobody.`, now);
+  if (val === null) return;
+  const res = await fetch("/api/schedules/drafts/" + draftId, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job, date: day, shift: key, names: val.split(",") }) });
+  if (!res.ok) { alert("Couldn't save"); return; }
+  sched = await api("/api/schedules/drafts/" + draftId);
+  render(); loadDrafts();
+}
+async function publishDraft() {
+  if (!confirm("Publish this schedule? Everyone signed in will see it.")) return;
+  const res = await fetch("/api/schedules/drafts/" + draftId, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "publish" }) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(out.error || "Publish failed"); return; }
+  draftId = null;
+  index = await api("/api/schedules");
+  loadDrafts(); pickSheet(sheet);
+}
+function closeDraft() { draftId = null; pickSheet(sheet); }
+async function deleteDraft(id) {
+  if (!confirm("Delete this draft?")) return;
+  await fetch("/api/schedules/drafts/" + id, { method: "DELETE" });
+  if (draftId === id) closeDraft();
+  loadDrafts();
 }
 
 function renderMine() {

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hourly Case Tracker - People</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial; background: #0f172a; color: #e5e7eb; padding: 20px; margin: 0 auto; max-width: 900px; }
+nav { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+nav a { color: #e5e7eb; background: #1e293b; padding: 8px 14px; border-radius: 6px; text-decoration: none; }
+nav a.on { background: #2563eb; }
+nav a.out { margin-left: auto; background: transparent; color: #94a3b8; }
+.card { background: #020617; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+small, .muted { color: #94a3b8; }
+textarea, select { width: 100%; padding: 10px; font-size: 15px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+textarea { min-height: 110px; }
+button { padding: 8px 12px; font-size: 14px; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; margin: 2px; }
+button.red { background: #dc2626; } button.ghost { background: #334155; } button.green { background: #059669; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid #1e293b; flex-wrap: wrap; }
+.row:first-of-type { border-top: none; }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #334155; }
+.tag.pending { background: #78350f; color: #fde68a; } .tag.disabled { background: #7f1d1d; } .tag.admin { background: #1d4ed8; } .tag.scheduler { background: #6d28d9; }
+.msg { min-height: 1.2em; color: #a7f3d0; }
+</style>
+</head>
+<body>
+<nav><a href="/">Cases</a><a href="/schedule">Schedule</a><a class="on" href="/admin">People</a><a class="out" href="/logout">Sign out</a></nav>
+<h1>People</h1>
+<div class="card"><h3>Waiting for approval</h3><div id="pending"></div></div>
+<div class="card"><h3>Accounts</h3><div id="users"></div></div>
+<div class="card">
+<h3>GPID list (who may sign up)</h3>
+<small>One person per line: GPID, then first and last name. Example: <code>12345678, Jane Doe</code></small>
+<textarea id="gpidText" placeholder="12345678, First Last"></textarea>
+<button onclick="addGpids()">Add to list</button>
+<div class="msg" id="gpidMsg"></div>
+<div id="gpids"></div>
+</div>
+<script>
+let state = null;
+function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+async function api(url, body) {
+  const res = await fetch(url, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.error || "Failed"); throw new Error(data.error); }
+  return data;
+}
+async function load() { state = await api("/api/admin/state"); render(); }
+async function act(uid, action, extra = {}) {
+  const names = { deny: "Deny and remove this sign-up?", disable: "Switch this account off?", reset: "Reset this account? They'll need to sign up again with their GPID (new password + authenticator)." };
+  if (names[action] && !confirm(names[action])) return;
+  await api("/api/admin/user", { uid, action, ...extra });
+  load();
+}
+function render() {
+  const pending = state.users.filter(u => u.status === "pending");
+  document.getElementById("pending").innerHTML = pending.length ? pending.map(u => `
+    <div class="row"><div><b>${esc(u.name)}</b> <small>GPID ${esc(u.gpid)}<br>${esc(u.email)} · signed up ${esc(u.created)}</small></div>
+    <div><button class="green" onclick="act('${u.uid}','approve')">Approve</button><button class="red" onclick="act('${u.uid}','deny')">Deny</button></div></div>`).join("")
+    : "<small>Nobody waiting.</small>";
+  const others = state.users.filter(u => u.status !== "pending" && u.status !== "enrolling");
+  document.getElementById("users").innerHTML = others.map(u => {
+    const roleSel = (state.me === "admin" || u.role !== "admin") ? `<select onchange="act('${u.uid}','role',{role:this.value})" style="width:auto">
+      ${["member", "scheduler", ...(state.me === "admin" ? ["admin"] : [])].map(r => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select>` : "";
+    return `<div class="row"><div><b>${esc(u.name)}</b> <span class="tag ${esc(u.role)}">${esc(u.role)}</span> ${u.status !== "active" ? `<span class="tag ${esc(u.status)}">${esc(u.status)}</span>` : ""}
+      <br><small>${esc(u.email)} · GPID ${esc(u.gpid)} · last sign-in ${esc(u.last_login || "never")}</small></div>
+      <div>${roleSel}${u.status === "active" ? `<button class="ghost" onclick="act('${u.uid}','disable')">Switch off</button>` : `<button class="green" onclick="act('${u.uid}','enable')">Switch on</button>`}
+      <button class="ghost" onclick="act('${u.uid}','reset')">Reset</button></div></div>`;
+  }).join("") || "<small>No accounts yet.</small>";
+  document.getElementById("gpids").innerHTML = `<p><small>${state.gpids.length} people on the list</small></p>` + state.gpids.map(g => `
+    <div class="row"><div>${esc(g.name)} <small>GPID ${esc(g.gpid)} ${g.has_account ? "· has account" : "· not signed up"}</small></div>
+    ${g.role === "admin" ? "" : `<button class="ghost" onclick="removeGpid('${esc(g.gpid)}')">Remove</button>`}</div>`).join("");
+}
+async function addGpids() {
+  const r = await api("/api/admin/gpids", { text: document.getElementById("gpidText").value });
+  document.getElementById("gpidMsg").textContent = r.status + (r.bad_lines.length ? ` · couldn't read: ${r.bad_lines.join(" | ")}` : "");
+  document.getElementById("gpidText").value = "";
+  load();
+}
+async function removeGpid(g) { if (confirm("Remove GPID " + g + " from the list?")) { await api("/api/admin/gpids", { remove: g }); load(); } }
+load();
+</script>
+</body>
+</html>

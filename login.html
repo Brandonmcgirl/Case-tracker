@@ -8,26 +8,61 @@
 <style>
 * { box-sizing: border-box; }
 body { font-family: Arial; background: #0f172a; color: #e5e7eb; padding: 20px; display: flex; justify-content: center; }
-.card { background: #020617; padding: 24px; border-radius: 10px; width: 100%; max-width: 380px; margin-top: 10vh; }
+.card { background: #020617; padding: 24px; border-radius: 10px; width: 100%; max-width: 380px; margin-top: 8vh; }
 input, button { width: 100%; padding: 12px; margin: 8px 0; font-size: 16px; border-radius: 6px; }
 input { border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+input.code { font-size: 28px; letter-spacing: 8px; text-align: center; }
 button { background: #2563eb; color: white; border: none; cursor: pointer; }
+button:disabled { opacity: .6; }
 .err { color: #fca5a5; min-height: 1.2em; }
-small { color: #94a3b8; }
+small, .muted { color: #94a3b8; }
+a { color: #93c5fd; }
 </style>
 </head>
 <body>
-<form class="card" method="post" action="/login">
+<div class="card">
 <h2>Hourly Case Tracker</h2>
-<small>Sign in with the tracker password.</small>
-<input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
-<div class="err" id="err"></div>
-<button type="submit">Sign In</button>
+<form id="step1" onsubmit="return signIn(event)">
+<input id="email" type="email" placeholder="Email" autocomplete="username" required autofocus>
+<input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+<button id="b1" type="submit">Next</button>
 </form>
+<form id="step2" style="display:none" onsubmit="return sendCode(event)">
+<p>Open your authenticator app and enter the 6-digit code for <b>Case Tracker</b>.</p>
+<input id="code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" required>
+<button id="b2" type="submit">Sign In</button>
+</form>
+<div class="err" id="err"></div>
+<p class="muted">New here? <a href="/signup">Sign up with your GPID</a></p>
+</div>
 <script>
-const e = new URLSearchParams(location.search).get("error");
-if (e === "wait") document.getElementById("err").textContent = "Too many wrong tries. Wait 15 minutes.";
-else if (e) document.getElementById("err").textContent = "Wrong password.";
+const err = document.getElementById("err");
+async function post(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return { ok: res.ok, data: await res.json().catch(() => ({})) };
+}
+async function signIn(e) {
+  e.preventDefault(); err.textContent = ""; document.getElementById("b1").disabled = true;
+  const r = await post("/api/auth/login", { email: document.getElementById("email").value, password: document.getElementById("password").value });
+  document.getElementById("b1").disabled = false;
+  if (!r.ok) { err.textContent = r.data.error || "Sign-in failed."; return false; }
+  document.getElementById("step1").style.display = "none";
+  document.getElementById("step2").style.display = "block";
+  document.getElementById("code").focus();
+  return false;
+}
+async function sendCode(e) {
+  e.preventDefault(); err.textContent = ""; document.getElementById("b2").disabled = true;
+  const r = await post("/api/auth/code", { code: document.getElementById("code").value });
+  document.getElementById("b2").disabled = false;
+  if (!r.ok) {
+    err.textContent = r.data.error || "Wrong code.";
+    if ((r.data.error || "").includes("Start again")) { document.getElementById("step2").style.display = "none"; document.getElementById("step1").style.display = "block"; }
+    return false;
+  }
+  location.href = r.data.next || "/";
+  return false;
+}
 </script>
 </body>
 </html>

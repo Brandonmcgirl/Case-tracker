@@ -3,7 +3,8 @@
 Private data lives in data/ (git-ignored, the repo is public):
   data/products.json             case SKU -> product, from the US + Canadian M# checklists
   data/photos/<id>.jpg           recent Markem photos (kept PHOTO_KEEP_DAYS)
-  data/schedules/<week>_<sheet>.json   one week of one schedule sheet ("8hr" or "12hr")
+  data/schedules/<week>_<sheet>.enc    one week of one schedule sheet ("8hr" or "12hr"), encrypted
+  data/import/<week>_<sheet>.json      drop a plain schedule here; it is encrypted and deleted on next use
 """
 import base64
 import datetime
@@ -18,13 +19,15 @@ import anthropic
 from flask import request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 
-from server import (app, check_role, load_log, save_log, load_downtime, save_downtime,
-                    end_run, format_local_time, TIMEZONE)
+import securestore as store
+from server import app, load_log, save_log, end_run, format_local_time, is_admin, TIMEZONE
 
 DATA_DIR = "data"
 PRODUCTS_FILE = os.path.join(DATA_DIR, "products.json")
 PHOTO_DIR = os.path.join(DATA_DIR, "photos")
 SCHEDULE_DIR = os.path.join(DATA_DIR, "schedules")
+IMPORT_DIR = os.path.join(DATA_DIR, "import")
+SCHEDULE_ID = re.compile(r"\d{4}-\d{2}-\d{2}_(8hr|12hr)")
 PHOTO_KEEP_DAYS = 7
 PHOTO_MAX_SIDE = 1280
 # Which Claude reads the photos: claude-opus-5-5 (default) or claude-haiku-4-5 (about 1/5 the cost).
@@ -55,11 +58,6 @@ READ_SCHEMA = {
     "required": ["readable", "job", "batch", "total", "screen_time", "state", "problem"],
     "additionalProperties": False,
 }
-
-
-def _role():
-    data = request.form if request.form else (request.get_json(silent=True) or {})
-    return check_role(data.get("password", ""))
 
 
 def load_products():
@@ -136,9 +134,6 @@ def read_markem(jpeg, model=None):
 
 @app.route("/api/photo/read", methods=["POST"])
 def photo_read():
-    is_admin, is_user = _role()
-    if not (is_admin or is_user):
-        return jsonify({"error": "Wrong password"}), 403
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return jsonify({"error": "Photo reading isn't switched on yet (no Claude API key on the server)."}), 503
     upload = request.files.get("photo")
@@ -218,9 +213,6 @@ def _material_label(sku, name):
 def photo_save():
     """Save a checked photo reading: hourly entry on the active run, or start a (new) run."""
     data = request.get_json(force=True)
-    is_admin, is_user = check_role(data.get("password", ""))
-    if not (is_admin or is_user):
-        return jsonify({"error": "Wrong password"}), 403
     line = str(data.get("line", "")).strip()
     sku = str(data.get("sku", "")).strip()
     name = str(data.get("product_name", "")).strip()
@@ -247,8 +239,8 @@ def photo_save():
 
     log_data = load_log()
     if not any(e.get("line") == line for e in log_data):
-        if not is_admin:
-            return jsonify({"error": "Admin password required to create lines"}), 403
+        if not is_admin():
+            return jsonify({"error": "Only an admin can create lines"}), 403
         log_data.append({"date": when.strftime("%a %b %d %Y"), "time": "Init", "material": "-",
                          "count": 0, "diff": 0, "line": line})
         save_log(log_data)
@@ -267,11 +259,6 @@ def photo_save():
             "count": count, "diff": 0, "line": line, "targetCount": target,
             "timestamp": when.isoformat(), "photo": data.get("photo_id", ""),
         })
-        downtime = load_downtime()
-        downtime.setdefault(line, {"status": "stopped", "start_time": None, "total_uptime": 0, "total_downtime": 0})
-        if downtime[line]["start_time"] is None:
-            downtime[line]["start_time"] = when.isoformat()
-        save_downtime(downtime)
         save_log(log_data)
         return jsonify({"status": f"Run started on line {line}: {material}, {count} cases"})
 
@@ -301,17 +288,33 @@ def products_list():
 
 # --- Schedule ---------------------------------------------------------------
 
+def import_schedules():
+    """Encrypt any plain schedule files dropped into data/import/, then delete the plain copies."""
+    if not os.path.isdir(IMPORT_DIR):
+        return
+    for name in os.listdir(IMPORT_DIR):
+        if not (name.endswith(".json") and SCHEDULE_ID.fullmatch(name[:-5])):
+            continue
+        path = os.path.join(IMPORT_DIR, name)
+        with open(path) as f:
+            sched = json.load(f)
+        store.write(os.path.join(SCHEDULE_DIR, name[:-5] + ".enc"), sched)
+        os.remove(path)
+        print(f"schedule imported: {name[:-5]}")
+
+
 @app.route("/api/schedules")
 def schedules_index():
-    """Every loaded week/sheet, newest first: [{week_start, sheet, status, title}]"""
+    """Every loaded week/sheet, newest first: [{id, week_start, sheet, status, title}]"""
+    with store.locked("schedules"):
+        import_schedules()
     out = []
     if os.path.isdir(SCHEDULE_DIR):
         for name in os.listdir(SCHEDULE_DIR):
-            if not name.endswith(".json"):
+            if not (name.endswith(".enc") and SCHEDULE_ID.fullmatch(name[:-4])):
                 continue
-            with open(os.path.join(SCHEDULE_DIR, name)) as f:
-                s = json.load(f)
-            out.append({"id": name[:-5], "week_start": s.get("week_start"), "sheet": s.get("sheet"),
+            s = store.read(os.path.join(SCHEDULE_DIR, name), {})
+            out.append({"id": name[:-4], "week_start": s.get("week_start"), "sheet": s.get("sheet"),
                         "status": s.get("status", "posted"), "title": s.get("title", "")})
     out.sort(key=lambda s: (s["week_start"] or "", s["sheet"] or ""), reverse=True)
     return jsonify(out)
@@ -319,10 +322,187 @@ def schedules_index():
 
 @app.route("/api/schedules/<sched_id>")
 def schedule_get(sched_id):
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}_(8hr|12hr)", sched_id):
+    path = os.path.join(SCHEDULE_DIR, sched_id + ".enc")
+    if not SCHEDULE_ID.fullmatch(sched_id) or not os.path.exists(path):
         return jsonify({"error": "Not found"}), 404
-    path = os.path.join(SCHEDULE_DIR, sched_id + ".json")
+    return jsonify(store.read(path, {}))
+
+
+# --- Schedule upload: photo / PDF / Word / Excel -> draft -> check -> publish ---------------------
+# Read on this server only (local OCR / file text, no AI, no cloud). The uploaded file is never stored.
+
+import subprocess
+import sys
+import schedule_parser
+
+JOB_DIR = os.path.join(DATA_DIR, "jobs")
+DRAFT_DIR = os.path.join(DATA_DIR, "drafts")
+UPLOAD_TYPES = (".jpg", ".jpeg", ".png", ".webp", ".pdf", ".docx", ".xlsx", ".xlsm")
+
+
+def _staff():
+    return getattr(request, "role", None) in ("admin", "scheduler")
+
+
+def _all_schedules():
+    out = []
+    if os.path.isdir(SCHEDULE_DIR):
+        for name in sorted(os.listdir(SCHEDULE_DIR)):
+            if name.endswith(".enc") and SCHEDULE_ID.fullmatch(name[:-4]):
+                out.append(store.read(os.path.join(SCHEDULE_DIR, name), {}))
+    return out
+
+
+def _roster():
+    names = set()
+    for s in _all_schedules():
+        for a in s.get("areas", []):
+            for j in a["jobs"]:
+                for sl in j.get("slots", {}).values():
+                    for ppl in sl.values():
+                        for p in ppl:
+                            n = p if isinstance(p, str) else p.get("name", "")
+                            if n and n[0].isalpha() and n != "(open)":
+                                names.add(n)
+    import accounts
+    for g in accounts.load_gpids().values():
+        names.add(g["schedule_name"])
+    return names
+
+
+def _job_write(job):
+    os.makedirs(JOB_DIR, exist_ok=True)
+    with open(os.path.join(JOB_DIR, job["id"] + ".json"), "w") as f:
+        json.dump(job, f)
+
+
+def _run_job(job, filename, data):
+    try:
+        job["message"] = "Reading the file..."; _job_write(job)
+        words, img = schedule_parser.read_any(filename, data)
+        sheet = "12hr" if any("CREW" in w["t"].upper() for w in words) else "8hr"
+        same = [s for s in _all_schedules() if s.get("sheet") == sheet]
+        template = same[-1] if same else None
+        job["message"] = "Sorting names into days, shifts and jobs..."; _job_write(job)
+        weeks = schedule_parser.parse(words, template=template, roster=_roster(), img=img)
+        if not weeks:
+            raise ValueError("Couldn't find the day headers (Sunday, Monday...) on this sheet.")
+        for w in weeks:
+            w["source"] = filename
+            w["template"] = template.get("week_start") if template else None
+            did = f"{w['week_start']}_{w['sheet']}_{w['status']}_{secrets.token_hex(3)}"
+            store.write(os.path.join(DRAFT_DIR, did + ".enc"), w)
+            job["drafts"].append(did)
+        job["status"], job["message"] = "done", f"Read {len(weeks)} week(s). Check and publish below."
+    except Exception as e:
+        print(f"schedule job {job['id']} failed: {e!r}")
+        job["status"], job["message"] = "error", f"Couldn't read that file: {e}"
+    finally:
+        del data
+        _job_write(job)
+
+
+@app.route("/api/schedules/upload", methods=["POST"])
+def schedule_upload():
+    if not _staff():
+        return jsonify({"error": "Only the scheduler or admin can upload schedules"}), 403
+    f = request.files.get("file")
+    if not f or not f.filename.lower().endswith(UPLOAD_TYPES):
+        return jsonify({"error": "Send a photo (JPG/PNG), PDF, Word (.docx) or Excel (.xlsx) file"}), 400
+    job = {"id": datetime.datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(3),
+           "status": "running", "message": "Starting...", "file": f.filename, "drafts": [], "by": request.user_name}
+    _job_write(job)
+    # Read it in a separate low-priority process (OCR is CPU-heavy; the web workers must stay responsive).
+    # The file goes over a pipe, never to disk.
+    proc = subprocess.Popen([sys.executable, "-c", "import sys, features; features.run_job_stdin(sys.argv[1], sys.argv[2])",
+                             job["id"], f.filename], stdin=subprocess.PIPE, cwd=os.path.dirname(os.path.abspath(__file__)),
+                            start_new_session=True, preexec_fn=lambda: os.nice(10))
+    proc.stdin.write(f.read())
+    proc.stdin.close()
+    return jsonify(job)
+
+
+def run_job_stdin(job_id, filename):
+    with open(os.path.join(JOB_DIR, job_id + ".json")) as fh:
+        job = json.load(fh)
+    _run_job(job, filename, sys.stdin.buffer.read())
+
+
+@app.route("/api/schedules/jobs/<job_id>")
+def schedule_job(job_id):
+    if not _staff() or not re.fullmatch(r"[0-9-]+[0-9a-f]{6}", job_id):
+        return jsonify({"error": "Not found"}), 404
+    path = os.path.join(JOB_DIR, job_id + ".json")
     if not os.path.exists(path):
         return jsonify({"error": "Not found"}), 404
-    with open(path) as f:
-        return jsonify(json.load(f))
+    with open(path) as fh:
+        return jsonify(json.load(fh))
+
+
+DRAFT_ID = re.compile(r"\d{4}-\d{2}-\d{2}_(8hr|12hr)_(posted|proposed)_[0-9a-f]{6}")
+
+
+def _draft_path(did):
+    return os.path.join(DRAFT_DIR, did + ".enc") if DRAFT_ID.fullmatch(did) else None
+
+
+def _review_count(d):
+    return sum(1 for a in d["areas"] for j in a["jobs"] for sl in j.get("slots", {}).values()
+               for ppl in sl.values() for p in ppl if isinstance(p, dict) and p.get("check"))
+
+
+@app.route("/api/schedules/drafts")
+def drafts_list():
+    if not _staff():
+        return jsonify({"error": "Not allowed"}), 403
+    out = []
+    if os.path.isdir(DRAFT_DIR):
+        for name in sorted(os.listdir(DRAFT_DIR), reverse=True):
+            if name.endswith(".enc") and DRAFT_ID.fullmatch(name[:-4]):
+                d = store.read(os.path.join(DRAFT_DIR, name), {})
+                out.append({"id": name[:-4], "week_start": d["week_start"], "sheet": d["sheet"], "status": d["status"],
+                            "source": d.get("source"), "to_check": _review_count(d), "notes": d.get("review", [])[:50]})
+    return jsonify(out)
+
+
+@app.route("/api/schedules/drafts/<did>", methods=["GET", "POST", "DELETE"])
+def draft_one(did):
+    if not _staff():
+        return jsonify({"error": "Not allowed"}), 403
+    path = _draft_path(did)
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "Not found"}), 404
+    if request.method == "DELETE":
+        os.remove(path)
+        return jsonify({"status": "deleted"})
+    with store.locked("drafts"):
+        d = store.read(path, {})
+        if request.method == "GET":
+            return jsonify(d)
+        body = request.get_json(force=True)
+        if body.get("action") == "publish":
+            for a in d["areas"]:
+                for j in a["jobs"]:
+                    for sl in j.get("slots", {}).values():
+                        for k, ppl in sl.items():
+                            sl[k] = [{x: v for x, v in p.items() if x != "check"} if isinstance(p, dict) else p for p in ppl]
+            d["review"] = []
+            d["published_by"] = request.user_name
+            d["published"] = format_local_time()
+            store.write(os.path.join(SCHEDULE_DIR, f"{d['week_start']}_{d['sheet']}.enc"), d)
+            os.remove(path)
+            return jsonify({"status": "published", "id": f"{d['week_start']}_{d['sheet']}"})
+        # edit one cell: {job, date, shift, names: ["LAST FIRST", ...]}
+        job, date, sk = body.get("job"), body.get("date"), body.get("shift")
+        names = [str(n).strip().upper() for n in body.get("names", []) if str(n).strip()]
+        target = next((j for a in d["areas"] for j in a["jobs"] if j["name"] == job), None)
+        if target is None:
+            return jsonify({"error": "No such job"}), 404
+        old = {(p if isinstance(p, str) else p["name"]): p for p in target.get("slots", {}).get(date, {}).get(sk, [])}
+        new = []
+        for n in names:
+            p = old.get(n)
+            new.append({x: v for x, v in p.items() if x != "check"} if isinstance(p, dict) else {"name": n})
+        target.setdefault("slots", {}).setdefault(date, {})[sk] = new
+        store.write(path, d)
+        return jsonify({"status": "saved", "to_check": _review_count(d)})
