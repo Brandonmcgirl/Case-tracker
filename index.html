@@ -69,9 +69,13 @@ border-radius: 5px;
 <h1>Hourly Case Tracker By: Brandon McGirl</h1>
 <div class="card">
 <h3>Case Count From Photo</h3>
-<small>Take a photo of the Markem 5000 screen. Claude reads the job and batch count, you check it, then save.</small>
-<input id="photoInput" type="file" accept="image/*" capture="environment" style="display:none" onchange="readPhoto(this)">
-<button class="photo" onclick="document.getElementById('photoInput').click()">📷 Read Markem Photo</button>
+<small>Take or upload a photo of the Markem 5000 screen. Claude reads the job and batch count, you check it, then save.</small>
+<input id="photoCamera" type="file" accept="image/*" capture="environment" style="display:none" onchange="readPhoto(this)">
+<input id="photoUpload" type="file" accept="image/*" style="display:none" onchange="readPhoto(this)">
+<div class="btn-row">
+<button class="photo" onclick="document.getElementById('photoCamera').click()">📷 Take Photo</button>
+<button class="photo" onclick="document.getElementById('photoUpload').click()">🖼️ Upload Photo</button>
+</div>
 <div id="photoResult"></div>
 </div>
 <div class="card">
